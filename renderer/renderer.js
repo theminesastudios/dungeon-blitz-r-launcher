@@ -47,6 +47,7 @@ function engineRows(state) {
     // deliberately idle until a game session asks for it.
     let socialValue = 'starts with the game';
     let socialTone = 'muted';
+    let socialDetail = social.lastStatus || '';
     if (!social.enabled) {
         socialValue = 'off';
     } else if (social.lobbyReady) {
@@ -55,6 +56,11 @@ function engineRows(state) {
     } else if (social.authPending) {
         socialValue = 'waiting for Discord approval';
         socialTone = 'warn';
+    } else if (/Discord desktop client is not running/i.test(social.lastStatus || '')) {
+        // The one "lobby never connects" cause a player can fix themselves; say it instead
+        // of leaving a generic "connecting..." to decode.
+        socialValue = 'Discord client not running';
+        socialTone = 'bad';
     } else if (social.running) {
         socialValue = 'connecting...';
         socialTone = 'warn';
@@ -108,7 +114,7 @@ function engineRows(state) {
     return [
         { label: 'Flash', value: flashValue, tone: flashTone, detail: flashDetail },
         { label: 'Discord status', value: presenceValue, tone: presenceTone, detail: presenceDetail },
-        { label: 'Lobby chat', value: socialValue, tone: socialTone, detail: social.lastStatus || '' },
+        { label: 'Lobby chat', value: socialValue, tone: socialTone, detail: socialDetail },
         { label: 'In-game chat', value: chatValue, tone: chatTone, detail: chatDetail }
     ];
 }

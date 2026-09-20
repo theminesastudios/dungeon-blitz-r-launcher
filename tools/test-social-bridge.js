@@ -269,6 +269,80 @@ async function testDiscordAuthorization(mock, mockUrl, tmp) {
     console.log('[test-social-bridge] Discord-client authorization + lobby + chat: OK');
 }
 
+/**
+ * Closing the game window stops the lobby; playing again must start a session that actually
+ * mirrors chat. The launcher's wrapper used to keep the old driver's listeners, so the
+ * second session's events went nowhere and the window kept showing a lobby that was gone.
+ */
+async function testLobbyRestart(mock, mockUrl, tmp) {
+    const directory = fs.mkdtempSync(path.join('/tmp', 'dipc3-'));
+    const previousEnv = {
+        TMPDIR: process.env.TMPDIR,
+        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR
+    };
+    process.env.TMPDIR = `${directory}/`;
+    process.env.XDG_RUNTIME_DIR = directory;
+    const ipc = await startMockDiscordIpc(directory);
+    const tokenCachePath = path.join(tmp, 'token-restart.json');
+    const openUrl = () => assert.fail('no browser may be opened');
+
+    try {
+        const first = new JsSocialBridge({ openUrl });
+        const firstStart = first.start(baseConfig({ tokenCachePath, mockUrl, overrides: {} }));
+        const firstLobby = await waitForEvent(first, 'lobby_ready');
+        assert.strictEqual(firstLobby.lobbyId, 'lobby-1');
+        first.stop();
+        await firstStart;
+
+        // A second session, as after closing the game window and playing again: the cached
+        // token is reused, so no second consent dialog may be needed.
+        const second = new JsSocialBridge({ openUrl });
+        const secondStart = second.start(baseConfig({ tokenCachePath, mockUrl, overrides: {} }));
+        const secondLobby = await waitForEvent(second, 'lobby_ready');
+        assert.strictEqual(secondLobby.lobbyId, 'lobby-1', 'the second session joins the lobby again');
+
+        mock.setMessages([
+            {
+                id: 'msg-r2',
+                content: 'after restart',
+                author: { id: 'u-2', username: 'other', global_name: 'Other' },
+                lobby_id: 'lobby-1'
+            }
+        ]);
+        const chat = await waitForEvent(second, 'chat');
+        assert.strictEqual(chat.message, 'after restart', 'the restarted session mirrors chat');
+
+        second.stop();
+        await secondStart;
+
+        // The wrapper must detach the previous driver on stop: a listener left behind is
+        // how a dead session kept steering the status after a restart.
+        const { SocialBridge } = require('../lib/social');
+        const wrapper = new SocialBridge({ tokenCachePath: path.join(tmp, 'wrapper.json'), openUrl });
+        let detached = false;
+        wrapper.jsBridge = {
+            removeAllListeners: () => {
+                detached = true;
+            },
+            stop: () => {}
+        };
+        wrapper.stop();
+        assert.ok(detached, 'stop() must detach the previous driver');
+    } finally {
+        ipc.server.close();
+        for (const [name, value] of Object.entries(previousEnv)) {
+            if (value === undefined) {
+                delete process.env[name];
+            } else {
+                process.env[name] = value;
+            }
+        }
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+
+    console.log('[test-social-bridge] closing the game and playing again restarts the lobby: OK');
+}
+
 /** Phase 2: the browser flow still works when it is explicitly enabled. */
 async function testBrowserAuthorization(mock, mockUrl, tmp) {
     const tokenCachePath = path.join(tmp, 'token-browser.json');
@@ -321,6 +395,7 @@ async function main() {
     try {
         await testDiscordAuthorization(mock, mockUrl, tmp);
         await testBrowserAuthorization(mock, mockUrl, tmp);
+        await testLobbyRestart(mock, mockUrl, tmp);
     } finally {
         mock.server.close();
         fs.rmSync(tmp, { recursive: true, force: true });
