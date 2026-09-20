@@ -135,9 +135,20 @@ npm run dist:win -- --dir --config.win.signAndEditExecutable=false
 
 ### GitHub Actions
 
-`.github/workflows/release.yml` builds on three native runners, stages the binaries, checks
-that Flash is present and runs electron-builder. Artifacts are uploaded per platform; a
-`v*` tag (or a manual run with `release: true`) drafts a GitHub release.
+Bumping `version` in `package.json` on `main` is what cuts a release.
+`.github/workflows/release.yml` then builds on three native runners, stages the binaries,
+checks that Flash is present, runs electron-builder and attaches the installers to a draft
+GitHub release tagged `v<version>`:
+
+| Platform | Files |
+| --- | --- |
+| Windows | `...-win-x64-setup.exe`, `...-win-x64-portable.exe` |
+| macOS | `...-mac-x64.dmg`, `...-mac-x64.zip` |
+| Linux | `...-linux-x86_64.AppImage`, `...-linux-amd64.deb` |
+
+Editing `package.json` without changing the version builds nothing; the workflow compares
+against the previous commit first. A manual run builds the current version, and only
+publishes when `publish` is ticked.
 
 Packages are **unsigned**. Signing needs `CSC_LINK` and `CSC_KEY_PASSWORD` for Windows and
 macOS, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization.

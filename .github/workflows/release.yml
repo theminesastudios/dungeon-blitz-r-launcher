@@ -1,26 +1,65 @@
 name: Release
 
-# Builds the installable launcher for Windows, macOS and Linux on native runners.
-# Cross-building is not an option: the Windows installer needs Windows, the .dmg needs
-# macOS, and the native Discord Social SDK bridge has to be compiled per platform.
+# Bumping the version in package.json publishes the installers: a .exe for Windows, a .dmg
+# for macOS, and AppImage/deb for Linux, attached to a GitHub release.
+#
+# Each platform is built on its own runner. Cross-building is not an option: the Windows
+# installer needs Windows, the .dmg needs macOS, and the native Discord Social SDK bridge
+# has to be compiled per platform.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
   workflow_dispatch:
     inputs:
-      release:
-        description: "Draft a GitHub release with the installers"
+      publish:
+        description: "Attach the installers to a release"
         type: boolean
         default: false
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write
 
 jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      current: ${{ steps.check.outputs.current }}
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The previous commit is needed to tell a version bump from any other edit.
+          fetch-depth: 2
+          lfs: false
+
+      - name: Compare versions
+        id: check
+        run: |
+          current=$(jq -r .version package.json)
+          previous=$(git show HEAD~1:package.json 2>/dev/null | jq -r .version || echo "")
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          # A manual run is a deliberate "build this version": it is how the first release
+          # gets out, and how a failed build is retried without a fake bump.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual run; building $current."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$current" = "$previous" ]; then
+            echo "Version is still $current; nothing to build."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version went from ${previous:-none} to $current."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: ${{ matrix.label }}
+    needs: version
+    if: needs.version.outputs.changed == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       # One platform failing should not hide whether the others are shippable.
@@ -63,9 +102,9 @@ jobs:
 
       - name: Build Discord Social SDK bridge
         shell: bash
-        # The SDK payload is not redistributable, so it is not in this repository. When a
-        # job supplies it the bridge is rebuilt from source; otherwise the prebuilt binary
-        # in payload/social/<platform>/ is used as-is.
+        # The SDK is not redistributable, so it is not in this repository. When a job
+        # supplies it the bridge is rebuilt from source; otherwise the prebuilt binary in
+        # payload/social/<platform>/ is used as-is.
         run: |
           if [ ! -d native_bridge/discord_social_sdk ]; then
             echo "Social SDK not present; using the prebuilt bridge from payload/."
@@ -94,6 +133,10 @@ jobs:
           # APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID for notarization.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
+      - name: List what was built
+        shell: bash
+        run: ls -la dist/*.exe dist/*.dmg dist/*.zip dist/*.AppImage dist/*.deb 2>/dev/null || true
+
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
@@ -107,9 +150,10 @@ jobs:
             dist/*.deb
 
   release:
-    name: Draft release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.release
+    name: Publish release
+    needs: [version, build]
+    # A manual run only publishes when asked; a real version bump always does.
+    if: needs.version.outputs.changed == 'true' && (github.event_name != 'workflow_dispatch' || inputs.publish)
     runs-on: ubuntu-latest
     steps:
       - name: Download installers
@@ -118,11 +162,13 @@ jobs:
           path: installers
           merge-multiple: true
 
-      - name: Draft GitHub release
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
-          name: Dungeon Blitz R Launcher
+          tag_name: v${{ needs.version.outputs.current }}
+          name: Launcher v${{ needs.version.outputs.current }}
+          generate_release_notes: true
+          # Left as a draft so the unsigned builds get a look before players see them.
           draft: true
           files: installers/*
         env:

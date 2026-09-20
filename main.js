@@ -19,11 +19,10 @@ const {
 const GAME_WINDOW_DEFAULTS = { width: 1200, height: 800, minWidth: 800, minHeight: 600 };
 const BACKGROUND_COLOR = '#484955';
 
-// package.json carries the scoped name GitHub Packages requires, which Electron would
-// otherwise turn into a user data folder called "@theminesastudios/dungeon-blitz-r-launcher"
-// -- a slash inside a directory name, and every player's saved sign-in stranded in the old
-// one. setName alone does not undo it: the default path is resolved before the main script
-// runs, so the path is set outright.
+// Electron derives the user data folder from package.json's name, so renaming the package
+// would stranded every player's saved sign-in in the old folder. Pinning it outright keeps
+// that folder fixed whatever the package is called. setName alone is not enough: the
+// default path is resolved before this script runs.
 const APP_DIRECTORY_NAME = 'dungeon-blitz-r-launcher';
 app.setName(APP_DIRECTORY_NAME);
 app.setPath('userData', path.join(app.getPath('appData'), APP_DIRECTORY_NAME));
