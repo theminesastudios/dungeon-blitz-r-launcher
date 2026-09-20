@@ -112,6 +112,7 @@ function post(port, pathname, payload, origin) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const GAME_ORIGIN = 'http://play.example.test';
+const { LEVEL_AREA_IMAGE_KEYS } = require('../lib/presence');
 const PRESENCE_PAYLOAD = {
     characterName: 'BridgeProbe',
     characterClass: 'Warrior',
@@ -182,6 +183,37 @@ async function main() {
     assert.strictEqual(activity.assets.small_text, 'BridgeProbe - Warrior');
     assert.strictEqual(activity.assets.large_image, 'home', 'CraftTown falls back to the home artwork');
     assert.strictEqual(activity.assets.large_text, 'Home');
+
+    // Every area the game can name gets its own artwork, not the generic dungeon image.
+    // These pushed used to all render as `indungeon` because resolveLargeImageKey only
+    // knew three keys.
+    for (const area of ['blackrosemire', 'castlehocke', 'cemeteryhill', 'emeraldglades', 'fellbridge', 'shazaridesert', 'stormshardmountain', 'valhaven']) {
+        const pushed = await post(port, '/presence', { ...PRESENCE_PAYLOAD, areaKey: area }, GAME_ORIGIN);
+        assert.strictEqual(pushed.status, 200);
+        const activityForArea = discord.state.activities[discord.state.activities.length - 1].activity;
+        assert.strictEqual(activityForArea.assets.large_image, area, `${area} shows its own artwork`);
+        // A level key alone -- no separate area key -- resolves the same way.
+        const byLevelKey = LEVEL_AREA_IMAGE_KEYS[area];
+        assert.ok(byLevelKey, `the table itself covers ${area}`);
+    }
+
+    // The dungeon/level keys and the class disciplines are covered too, including their
+    // exact spellings from the asset list.
+    for (const key of ['dungeon_blitz', 'embedded_background', 'embedded_cover', 'indungeon', 'newbieroad', 'flameseer', 'frostbringer', 'justicar', 'mage', 'necromancer', 'paladin', 'rogue', 'sentinel', 'shadowbringer', 'soulthieft', 'templar', 'viperblade']) {
+        assert.ok(Object.values(LEVEL_AREA_IMAGE_KEYS).includes(key), `artwork key "${key}" is mapped`);
+    }
+
+    // Unknown areas fall through to the page's raw key (forward compatibility with art
+    // uploaded after this build) -- and that is exactly what DUNGEON_BLITZ_LOG_PRESENCE=1
+    // is for: it prints the keys the page actually sends, so a mismatch with the uploaded
+    // asset names can be spotted and the table extended.
+    const unknown = await post(port, '/presence', { ...PRESENCE_PAYLOAD, areaKey: 'moomooplain', levelKey: 'MoomooPlain' }, GAME_ORIGIN);
+    assert.strictEqual(unknown.status, 200);
+    const unknownActivity = discord.state.activities[discord.state.activities.length - 1].activity;
+    assert.strictEqual(unknownActivity.assets.large_image, 'moomooplain', 'an unknown area key passes through unchanged');
+
+    // Back to the original area, so the dedupe check below compares like with like.
+    await post(port, '/presence', PRESENCE_PAYLOAD, GAME_ORIGIN);
     assert.strictEqual(typeof activity.timestamps.start, 'number', 'the start time is epoch milliseconds');
     assert.ok(activity.timestamps.start > 0);
     assert.strictEqual(activity.buttons[0].url, 'https://theminesa.studio/dungeon-blitz-r');
@@ -194,33 +226,35 @@ async function main() {
     assert.ok(Number.isFinite(discord.state.activities[0].pid), 'an activity is attributed to a pid');
 
     // The same payload again is not a second update: the page pushes every four seconds.
+    // (Eleven SET_ACTIVITY frames so far: the original push, one per area probed, and the
+    // return to the original area.)
     const repeated = await post(port, '/presence', PRESENCE_PAYLOAD, GAME_ORIGIN);
     assert.strictEqual(repeated.status, 202);
     assert.strictEqual(repeated.body.updated, false);
-    assert.strictEqual(discord.state.activities.length, 1);
+    assert.strictEqual(discord.state.activities.length, 11);
 
     // /clear is the page's own "no session" case, and a second one is a no-op.
     await post(port, '/clear', { clear: true }, GAME_ORIGIN);
-    assert.strictEqual(discord.state.activities.length, 2);
-    assert.strictEqual(discord.state.activities[1].activity, null);
+    assert.strictEqual(discord.state.activities.length, 12);
+    assert.strictEqual(discord.state.activities[11].activity, null);
     await post(port, '/clear', { clear: true }, GAME_ORIGIN);
-    assert.strictEqual(discord.state.activities.length, 2, 'clearing an empty profile sends nothing');
+    assert.strictEqual(discord.state.activities.length, 12, 'clearing an empty profile sends nothing');
 
     // A payload without a character (the game page on its sign-in screen) means the same.
     await post(port, '/presence', PRESENCE_PAYLOAD, GAME_ORIGIN);
-    assert.strictEqual(discord.state.activities.length, 3);
+    assert.strictEqual(discord.state.activities.length, 13);
     const cleared = await post(port, '/presence', { characterName: '', details: '', state: '', startedAtMs: 0 }, GAME_ORIGIN);
     assert.strictEqual(cleared.status, 202);
     assert.strictEqual(cleared.body.cleared, true);
-    assert.strictEqual(discord.state.activities.length, 4);
-    assert.strictEqual(discord.state.activities[3].activity, null);
+    assert.strictEqual(discord.state.activities.length, 14);
+    assert.strictEqual(discord.state.activities[13].activity, null);
 
     // Any other game page gets nothing: a browser tab on some other site cannot write to
     // the player's Discord profile through this endpoint.
     const refused = await post(port, '/presence', PRESENCE_PAYLOAD, 'http://evil.example.test');
     assert.strictEqual(refused.status, 403);
     assert.strictEqual(refused.body.reason, 'origin-not-allowed');
-    assert.strictEqual(discord.state.activities.length, 4, 'a refused origin never reaches Discord');
+    assert.strictEqual(discord.state.activities.length, 14, 'a refused origin never reaches Discord');
 
     // /configure is what the page uses to learn where to send a party join.
     const configured = await post(port, '/configure', { characterName: 'BridgeProbe' }, GAME_ORIGIN);
@@ -240,7 +274,7 @@ async function main() {
     // would keep the player shown as playing a game they closed.
     bridge.stop();
     await sleep(300);
-    assert.strictEqual(discord.state.activities.length, 4, 'nothing was left to clear on stop()');
+    assert.strictEqual(discord.state.activities.length, 14, 'nothing was left to clear on stop()');
     assert.strictEqual(bridge.snapshot().running, false);
 
     // A game that was running when the window closed is cleared on the way out, so the
@@ -252,11 +286,11 @@ async function main() {
     second.start({ serverUrl: GAME_ORIGIN, gameWindowPid: process.pid });
     await sleep(400);
     await post(second.snapshot().port, '/presence', PRESENCE_PAYLOAD, GAME_ORIGIN);
-    assert.strictEqual(discord.state.activities.length, 5);
+    assert.strictEqual(discord.state.activities.length, 15);
     second.stop();
     await sleep(300);
-    assert.strictEqual(discord.state.activities.length, 6);
-    assert.strictEqual(discord.state.activities[5].activity, null);
+    assert.strictEqual(discord.state.activities.length, 16);
+    assert.strictEqual(discord.state.activities[15].activity, null);
 
     await discord.close();
     fs.rmSync(runtimeDir, { recursive: true, force: true });
