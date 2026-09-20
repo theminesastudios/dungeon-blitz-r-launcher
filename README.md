@@ -247,6 +247,15 @@ Each `dist:` script first runs `tools/preflight.js` for its platform, which fail
 build when that platform has no Flash plugin staged in `vendor/` (override for a
 deliberate Flash-less package: `DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1`).
 
+The application icon comes from one source image, `build/icon.png` (1024×1024 with alpha).
+`npm run make-icons` derives the rest from it on a Mac: `build/icon.icns` (macOS app, dock
+and dmg), `build/icon.ico` (Windows and Linux, sizes 16–256), `renderer/assets/icon.png`
+(what the windows and the Linux dock load at runtime) and `renderer/assets/favicon.ico`
+(the sign-in page's tab icon). The ICO is assembled in `tools/make-icons.js` rather than
+converted, because `sips` writes BMP rows top-down and an ICO wants them bottom-up -- the
+generic conversion mistake that ships an upside-down taskbar icon. All of it is committed,
+so packaging never needs to regenerate.
+
 Output lands in `dist/`. What can be built where:
 
 | Target | On Windows | On Linux (incl. WSL) | On macOS |
