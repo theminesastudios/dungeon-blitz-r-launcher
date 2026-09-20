@@ -5,7 +5,7 @@
   "homepage": "https://theminesa.studio",
   "repository": {
     "type": "git",
-    "url": "https://github.com/theminesastudios/dungeon-blitz-r-launcher.git"
+    "url": "git+https://github.com/theminesastudios/dungeon-blitz-r-launcher.git"
   },
   "main": "main.js",
   "files": [
