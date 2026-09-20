@@ -61,6 +61,7 @@ jobs:
     needs: version
     if: needs.version.outputs.changed == 'true'
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.allow_fail == true }}
     strategy:
       # One platform failing should not hide whether the others are shippable.
       fail-fast: false
@@ -77,10 +78,15 @@ jobs:
             platform: darwin
             label: macOS
             builder_args: --mac
+          # Linux is allowed to fail: payload/flash/linux/ has never been committed, so the
+          # preflight rightly refuses it, and one missing platform must not stop the
+          # Windows and macOS installers from publishing. Its absence is visible in the
+          # run page rather than silent.
           - os: ubuntu-22.04
             platform: linux
             label: Linux
             builder_args: --linux
+            allow_fail: true
 
     steps:
       - name: Checkout
