@@ -1,0 +1,129 @@
+name: Release
+
+# Builds the installable launcher for Windows, macOS and Linux on native runners.
+# Cross-building is not an option: the Windows installer needs Windows, the .dmg needs
+# macOS, and the native Discord Social SDK bridge has to be compiled per platform.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Draft a GitHub release with the installers"
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not hide whether the others are shippable.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            label: Windows
+            builder_args: --win
+          # macos-13 is the Intel runner: the last Flash plugin is x86_64, and a PPAPI
+          # plugin must match the host process architecture.
+          - os: macos-13
+            platform: darwin
+            label: macOS
+            builder_args: --mac
+          - os: ubuntu-22.04
+            platform: linux
+            label: Linux
+            builder_args: --linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # payload/ holds the Flash plugin and the prebuilt bridges.
+          lfs: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        # The Social SDK links against ALSA and PulseAudio.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libpulse-dev
+
+      - name: Build Discord Social SDK bridge
+        shell: bash
+        # The SDK payload is not redistributable, so it is not in this repository. When a
+        # job supplies it the bridge is rebuilt from source; otherwise the prebuilt binary
+        # in payload/social/<platform>/ is used as-is.
+        run: |
+          if [ ! -d native_bridge/discord_social_sdk ]; then
+            echo "Social SDK not present; using the prebuilt bridge from payload/."
+            exit 0
+          fi
+          cmake -S native_bridge -B native_bridge/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build native_bridge/build --config Release
+
+      - name: Stage vendor binaries
+        shell: bash
+        run: node tools/stage-vendor.js --platform ${{ matrix.platform }} --bridge-build native_bridge/build
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Flash plugin
+        shell: bash
+        run: node tools/preflight.js --platform ${{ matrix.platform }}
+
+      - name: Build installers
+        run: npx electron-builder ${{ matrix.builder_args }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Unsigned builds. Signing needs the studio's certificates: CSC_LINK /
+          # CSC_KEY_PASSWORD for both Windows and macOS, plus APPLE_ID,
+          # APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID for notarization.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+
+  release:
+    name: Draft release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Draft GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          name: Dungeon Blitz R Launcher
+          draft: true
+          files: installers/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

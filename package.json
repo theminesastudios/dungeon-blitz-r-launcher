@@ -1,0 +1,93 @@
+{
+  "name": "dungeon-blitz-r-launcher",
+  "version": "1.0.0",
+  "description": "Dungeon Blitz: R launcher with an embedded Adobe Flash (PPAPI) runtime",
+  "homepage": "https://theminesa.studio",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "extract-flash": "node tools/extract-flash.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "predist:win": "node tools/preflight.js --platform win32",
+    "predist:mac": "node tools/preflight.js --platform darwin",
+    "predist:linux": "node tools/preflight.js --platform linux",
+    "build:bridge": "cmake -S native_bridge -B native_bridge/build -DCMAKE_BUILD_TYPE=Release && cmake --build native_bridge/build --config Release"
+  },
+  "devDependencies": {
+    "electron": "^11.5.0",
+    "electron-builder": "^24.13.3"
+  },
+  "author": "The Minesa Studios",
+  "license": "MIT",
+  "build": {
+    "appId": "studio.theminesa.dungeonblitzr.launcher",
+    "productName": "Dungeon Blitz R",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**/*",
+      "renderer/**/*",
+      "servers.json",
+      "social.config.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor",
+        "to": "vendor",
+        "filter": [
+          "flash/${platform}/**/*",
+          "social/${platform}/**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "DungeonBlitzR-Launcher-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.games",
+      "artifactName": "DungeonBlitzR-Launcher-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Game",
+      "maintainer": "The Minesa Studios <noreply@theminesa.studio>",
+      "artifactName": "DungeonBlitzR-Launcher-${version}-linux-${arch}.${ext}"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/theminesastudios/dungeon-blitz-r-launcher.git"
+  }
+}

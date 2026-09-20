@@ -1,0 +1,6 @@
+node_modules/
+dist/
+vendor/
+# Root-anchored: an unanchored `flash/` would also swallow payload/flash/.
+/flash/
+.DS_Store
