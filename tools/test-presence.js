@@ -168,17 +168,29 @@ async function main() {
     assert.strictEqual(updated.body.updated, true);
     assert.strictEqual(discord.state.activities.length, 1);
 
+    // Asserted in the shape the RPC socket actually takes, which is the whole point: these
+    // used to check the flat camelCase the discord-rpc library accepted, so they passed
+    // while Discord silently dropped every field it did not recognise -- artwork, party and
+    // join all missing from a presence whose text looked perfectly right.
     const activity = discord.state.activities[0].activity;
     assert.strictEqual(activity.details, 'Home');
     assert.strictEqual(activity.state, 'Idling in town');
-    assert.strictEqual(activity.partyId, '7');
-    assert.strictEqual(activity.partyMax, 4);
-    assert.strictEqual(activity.joinSecret, 'join-secret');
-    assert.strictEqual(activity.smallImageKey, 'warrior');
-    assert.strictEqual(activity.smallImageText, 'BridgeProbe - Warrior');
-    assert.strictEqual(activity.largeImageKey, 'home', 'CraftTown falls back to the home artwork');
-    assert.strictEqual(activity.largeImageText, 'Home');
+    assert.strictEqual(activity.party.id, '7');
+    assert.deepStrictEqual(activity.party.size, [2, 4], 'party size is a [current, max] pair');
+    assert.strictEqual(activity.secrets.join, 'join-secret');
+    assert.strictEqual(activity.assets.small_image, 'warrior');
+    assert.strictEqual(activity.assets.small_text, 'BridgeProbe - Warrior');
+    assert.strictEqual(activity.assets.large_image, 'home', 'CraftTown falls back to the home artwork');
+    assert.strictEqual(activity.assets.large_text, 'Home');
+    assert.strictEqual(typeof activity.timestamps.start, 'number', 'the start time is epoch milliseconds');
+    assert.ok(activity.timestamps.start > 0);
     assert.strictEqual(activity.buttons[0].url, 'https://theminesa.studio/dungeon-blitz-r');
+
+    // Nothing may go out under the library's old field names: Discord ignores them without
+    // complaining, which is exactly how this went unnoticed.
+    for (const stale of ['largeImageKey', 'smallImageKey', 'partyId', 'partySize', 'partyMax', 'joinSecret', 'startTimestamp']) {
+        assert.strictEqual(activity[stale], undefined, `${stale} is not a field the socket understands`);
+    }
     assert.ok(Number.isFinite(discord.state.activities[0].pid), 'an activity is attributed to a pid');
 
     // The same payload again is not a second update: the page pushes every four seconds.
