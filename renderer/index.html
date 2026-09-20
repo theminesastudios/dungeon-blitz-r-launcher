@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
+  <title>Dungeon Blitz: R</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <h1>Dungeon Blitz<span class="mark">: R</span></h1>
+
+    <button id="discord-login" type="button" class="discord">
+      <span class="label">Sign in with Discord</span>
+    </button>
+
+    <button id="play" type="button" class="link">Open the game</button>
+
+    <p id="status" class="status"></p>
+    <p id="problem" class="problem" hidden></p>
+
+    <div id="repair" class="repair" hidden>
+      <button id="browse-flash" type="button" class="ghost">Choose Flash plugin...</button>
+      <button id="relaunch" type="button" class="ghost" hidden>Restart launcher</button>
+    </div>
+
+    <button id="forget" type="button" class="link quiet" hidden>Use a different account</button>
+  </main>
+
+  <footer>
+    <span id="versions"></span>
+    <button id="quit" type="button" class="link">Quit</button>
+  </footer>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
