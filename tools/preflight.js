@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { pluginArchitectures } = require('../lib/flash');
+const { findUnpackagedFiles } = require('../lib/packageFiles');
 
 const LAUNCHER_ROOT = path.resolve(__dirname, '..');
 const VENDOR_ROOT = path.join(LAUNCHER_ROOT, 'vendor', 'flash');
@@ -66,10 +67,38 @@ function warnIfArchUnsupported(platform, directory, pluginName) {
     console.warn('');
 }
 
+/**
+ * A file the launcher reads at runtime that `build.files` does not match is absent from
+ * the packaged app, and the feature it configures fails in a way that looks like a bug in
+ * that feature rather than a packaging mistake. That is a broken release, so this stops
+ * the build instead of warning about it.
+ */
+function checkPackagedFiles() {
+    const buildConfig = require(path.join(LAUNCHER_ROOT, 'package.json')).build || {};
+    const { missingFiles, missingDirectories } = findUnpackagedFiles(buildConfig.files);
+    const missing = [...missingFiles, ...missingDirectories.map((directory) => `${directory}/`)];
+
+    if (missing.length === 0) {
+        console.log('[preflight] Pakete dahil olmasi gereken dosyalar: tamam');
+        return true;
+    }
+
+    console.error('');
+    console.error(`[preflight] HATA: build.files su dosyalari paketlemiyor: ${missing.join(', ')}`);
+    console.error('[preflight] Bu dosyalar olmadan paket calisir ama ozellikleri sessizce');
+    console.error('[preflight] devre disi kalir. package.json -> build.files listesini duzelt.');
+    console.error('');
+    return false;
+}
+
 function main() {
     const platform = parsePlatform(process.argv.slice(2));
     if (!EXPECTED[platform]) {
         console.error(`[preflight] Bilinmeyen platform: ${platform}`);
+        process.exit(1);
+    }
+
+    if (!checkPackagedFiles()) {
         process.exit(1);
     }
 

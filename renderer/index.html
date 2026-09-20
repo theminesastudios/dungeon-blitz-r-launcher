@@ -5,31 +5,71 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
   <title>Dungeon Blitz: R</title>
+  <!-- Fonts and artwork are the ones theminesa.studio/dungeon-blitz-r.html uses, vendored
+       locally: the window has to look like the site without reaching the network. -->
+  <link rel="stylesheet" href="assets/fonts.css">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
 </head>
 <body>
-  <main>
-    <h1>Dungeon Blitz<span class="mark">: R</span></h1>
+  <div class="db-hero__backdrop" aria-hidden="true"></div>
+  <div class="db-hero__vignette" aria-hidden="true"></div>
+  <div class="db-hero__grain" aria-hidden="true"></div>
 
-    <button id="discord-login" type="button" class="discord">
-      <span class="label">Sign in with Discord</span>
-    </button>
+  <main class="db-page">
+    <header class="db-header">
+      <span class="db-logo">
+        <img src="assets/logo.svg" alt="Dungeon Blitz R">
+      </span>
+      <nav class="db-nav" aria-label="Sections">
+        <span class="db-nav__link db-nav__link--active">Launcher</span>
+      </nav>
+      <span class="db-version" id="versions"></span>
+    </header>
 
-    <button id="play" type="button" class="link">Open the game</button>
+    <section class="db-copy">
+      <img class="db-copy__ornament" src="assets/ornament.svg" alt="">
+      <h1>Dungeon Blitz<span class="mark">: R</span></h1>
+      <p class="db-copy__lead">Side-scrolling brawler</p>
+      <p id="status" class="db-copy__status"></p>
+    </section>
 
-    <p id="status" class="status"></p>
+    <section class="db-actions">
+      <button id="discord-login" type="button" class="db-launch">
+        <span class="label">Sign in with Discord</span>
+      </button>
+      <button id="play" type="button" class="db-play">Open the game</button>
+
+      <!-- Signing in is a one-time thing: once an account is known the button is replaced by
+           it, whether the sign-in happened here or inside the game. -->
+      <div id="account" class="account" hidden>
+        <span id="account-name" class="account-name"></span>
+        <button id="forget" type="button" class="link quiet">Use a different account</button>
+      </div>
+    </section>
+
     <p id="problem" class="problem" hidden></p>
 
     <div id="repair" class="repair" hidden>
       <button id="browse-flash" type="button" class="ghost">Choose Flash plugin...</button>
       <button id="relaunch" type="button" class="ghost" hidden>Restart launcher</button>
+      <button id="move-app" type="button" class="ghost" hidden>Move to Applications</button>
     </div>
 
-    <button id="forget" type="button" class="link quiet" hidden>Use a different account</button>
+    <!-- What is armed and what is connected: Flash, rich presence, lobby chat and the
+         in-game chat mirror. The things that used to take a terminal and a guess. -->
+    <dl id="engine-status" class="engine-status"></dl>
   </main>
 
-  <footer>
-    <span id="versions"></span>
+  <footer class="db-footer">
+    <div class="db-credit">
+      <div class="db-credit__icons">
+        <img src="assets/rocking.svg" alt="">
+        <img src="assets/eye.svg" alt="">
+      </div>
+      <p>Remake by</p>
+      <strong>The Minesa Studios</strong>
+    </div>
     <button id="quit" type="button" class="link">Quit</button>
   </footer>
 
