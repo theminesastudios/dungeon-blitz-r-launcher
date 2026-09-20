@@ -108,7 +108,7 @@ function stageBridgeBuild(buildDir, platform) {
 function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!BRIDGE_FILES[args.platform]) {
-        console.error(`[stage-vendor] Bilinmeyen platform: ${args.platform}`);
+        console.error(`[stage-vendor] Unknown platform: ${args.platform}`);
         process.exit(1);
     }
 
@@ -117,14 +117,14 @@ function main() {
     const socialBuilt = stageBridgeBuild(args.bridgeBuild, args.platform);
 
     console.log(`[stage-vendor] platform: ${args.platform}`);
-    console.log(`[stage-vendor] flash:   ${flash.length ? flash.join(', ') : '(payload yok)'}`);
+    console.log(`[stage-vendor] flash:   ${flash.length ? flash.join(', ') : '(none in payload)'}`);
     console.log(
         `[stage-vendor] social:  ${
             socialBuilt.length
-                ? `${socialBuilt.join(', ')} (derlemeden)`
+                ? `${socialBuilt.join(', ')} (built)`
                 : socialPayload.length
                   ? `${socialPayload.join(', ')} (payload)`
-                  : '(yok - lobby chat calismaz)'
+                  : '(none - lobby chat will not work)'
         }`
     );
 }

@@ -2,12 +2,14 @@
 'use strict';
 
 /**
- * Reports whether the Flash plugin for a build's target platform is present in vendor/.
+ * Checks that a build's target platform has a Flash plugin in vendor/ before
+ * electron-builder runs.
  *
- * A package built without it still runs -- the launcher falls back to scanning the
- * player's own Flash installs -- but most players have none, so a silent Flash-less
- * package is the easiest way to ship something that cannot play the game. This prints a
- * loud warning instead of failing, so a deliberate Flash-less build stays possible.
+ * A package built without the plugin still runs -- the launcher falls back to scanning
+ * the player's own Flash installs -- but most players have none: 1.0.3's macOS build
+ * shipped that way and landed every player on the refusal dialog. A missing plugin
+ * therefore fails the build; a deliberate Flash-less package has to say so with
+ * DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1.
  *
  * Usage: node tools/preflight.js [--platform win32|darwin|linux]
  */
@@ -22,7 +24,7 @@ const LAUNCHER_ROOT = path.resolve(__dirname, '..');
 const VENDOR_ROOT = path.join(LAUNCHER_ROOT, 'vendor', 'flash');
 
 const EXPECTED = {
-    win32: 'pepflashplayer64.dll (veya pepflashplayer.dll)',
+    win32: 'pepflashplayer64.dll (or pepflashplayer.dll)',
     darwin: 'PepperFlashPlayer.plugin',
     linux: 'libpepflashplayer.so'
 };
@@ -60,10 +62,10 @@ function warnIfArchUnsupported(platform, directory, pluginName) {
 
     console.warn('');
     console.warn(
-        `[preflight] UYARI: ${pluginName} yalnizca ${architectures.join('/')} destekliyor, x64 yok.`
+        `[preflight] WARNING: ${pluginName} supports only ${architectures.join('/')}, not x64.`
     );
-    console.warn(`[preflight] ${platform} paketi x64; bu eklenti yuklenemez. x86_64 bir`);
-    console.warn('[preflight] eklenti uretip `npm run extract-flash` ile vendor/ altina kopyalayin.');
+    console.warn(`[preflight] The ${platform} package is x64, so this plugin cannot load. Produce an x86_64`);
+    console.warn('[preflight] plugin and copy it into vendor/ with `npm run extract-flash`.');
     console.warn('');
 }
 
@@ -79,14 +81,39 @@ function checkPackagedFiles() {
     const missing = [...missingFiles, ...missingDirectories.map((directory) => `${directory}/`)];
 
     if (missing.length === 0) {
-        console.log('[preflight] Pakete dahil olmasi gereken dosyalar: tamam');
+        console.log('[preflight] build.files covers every runtime file');
         return true;
     }
 
     console.error('');
-    console.error(`[preflight] HATA: build.files su dosyalari paketlemiyor: ${missing.join(', ')}`);
-    console.error('[preflight] Bu dosyalar olmadan paket calisir ama ozellikleri sessizce');
-    console.error('[preflight] devre disi kalir. package.json -> build.files listesini duzelt.');
+    console.error(`[preflight] ERROR: build.files does not package: ${missing.join(', ')}`);
+    console.error('[preflight] Without them the package runs but its features fail silently. Fix the list in');
+    console.error('[preflight] package.json -> build.files.');
+    console.error('');
+    return false;
+}
+
+function checkFlash(platform) {
+    const { directory, found } = describeVendor(platform);
+
+    if (found.length) {
+        console.log(`[preflight] ${platform}: Flash ready -> ${found.join(', ')}`);
+        warnIfArchUnsupported(platform, directory, found[0]);
+        return true;
+    }
+
+    if (process.env.DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH === '1') {
+        console.warn(`[preflight] ${platform}: no Flash plugin in vendor/ -- building anyway, DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1.`);
+        return true;
+    }
+
+    console.error('');
+    console.error(`[preflight] ERROR: no Flash plugin for ${platform} in vendor/.`);
+    console.error(`[preflight] Expected: ${directory}${path.sep}${EXPECTED[platform]}`);
+    console.error('[preflight] A package without it cannot play: the packaged launcher refuses to start and');
+    console.error('[preflight] names the build incomplete. Put the plugin in payload/flash/' + platform + '/ or run');
+    console.error('[preflight] `npm run extract-flash` on this machine, then rebuild.');
+    console.error('[preflight] A deliberate Flash-less package needs DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1.');
     console.error('');
     return false;
 }
@@ -94,29 +121,17 @@ function checkPackagedFiles() {
 function main() {
     const platform = parsePlatform(process.argv.slice(2));
     if (!EXPECTED[platform]) {
-        console.error(`[preflight] Bilinmeyen platform: ${platform}`);
+        console.error(`[preflight] Unknown platform: ${platform}`);
+        console.error('[preflight] Expected one of: win32, darwin, linux');
         process.exit(1);
     }
 
-    if (!checkPackagedFiles()) {
+    // Both run either way, so fixing one failure does not hide the other.
+    const filesOk = checkPackagedFiles();
+    const flashOk = checkFlash(platform);
+    if (!filesOk || !flashOk) {
         process.exit(1);
     }
-
-    const { directory, found } = describeVendor(platform);
-
-    if (found.length) {
-        console.log(`[preflight] ${platform}: Flash hazir -> ${found.join(', ')}`);
-        warnIfArchUnsupported(platform, directory, found[0]);
-        return;
-    }
-
-    console.warn('');
-    console.warn(`[preflight] UYARI: ${platform} icin Flash eklentisi yok.`);
-    console.warn(`[preflight] Beklenen: ${directory}${path.sep}${EXPECTED[platform]}`);
-    console.warn('[preflight] Paket yine de uretilir, ama oyuncunun kendi Flash kurulumu');
-    console.warn('[preflight] yoksa oyun acilmaz. Hedef platformda `npm run extract-flash`');
-    console.warn('[preflight] calistirip tekrar paketle.');
-    console.warn('');
 }
 
 main();
