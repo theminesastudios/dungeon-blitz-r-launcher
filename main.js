@@ -7,6 +7,7 @@ const bridge = require('./lib/bridge');
 const discordAuth = require('./lib/discordAuth');
 const { findFlashPlugin } = require('./lib/flash');
 const { SocialBridge } = require('./lib/social');
+const { createSessionCache } = require('./lib/launcherSession');
 const {
     LAUNCHER_ROOT,
     createStateStore,
@@ -29,6 +30,7 @@ app.setPath('userData', path.join(app.getPath('appData'), APP_DIRECTORY_NAME));
 
 const state = createStateStore(app.getPath('userData'));
 const social = new SocialBridge({ tokenCachePath: path.join(app.getPath('userData'), 'discord-social-token.json') });
+const sessionCache = createSessionCache(path.join(app.getPath('userData'), 'launcher-session.json'));
 
 let launcherWindow = null;
 let gameWindow = null;
@@ -280,7 +282,7 @@ function createGameWindow(url) {
     gameWindow.loadURL(url);
 }
 
-function play(serverId) {
+async function play(serverId) {
     if (gameWindow && !gameWindow.isDestroyed()) {
         gameWindow.focus();
         return { ok: true };
@@ -304,6 +306,17 @@ function play(serverId) {
     }
 
     state.write({ serverId: selected.id });
+
+    // Before the window, not after: the game page begins polling for a pending sign-in as soon
+    // as it loads, and the point of the saved token is that there is already one waiting.
+    const resumed = await resumeLauncherSession(selected.url);
+    if (resumed.expired) {
+        pushState();
+        return {
+            ok: false,
+            message: 'Your saved sign-in is no longer valid. Sign in with Discord again.'
+        };
+    }
 
     if (state.read().startDiscordBridge) {
         bridge.start({ clientUrl: selected.url, launcherConfig: loadLauncherConfig() });
@@ -337,7 +350,7 @@ function openDiscordLogin() {
     openExternal(authUrl);
 
     loginWatcher = discordAuth.watchForLogin(selected.url);
-    void loginWatcher.promise.then((pending) => {
+    void loginWatcher.promise.then(async (pending) => {
         loginWatcher = null;
         if (!pending) {
             pushState();
@@ -345,9 +358,13 @@ function openDiscordLogin() {
         }
 
         rememberDiscordLogin(pending.email);
+        // While the hand-off this sign-in created is still live, which is what the server
+        // grants the token against. It is also what play() below spends, so the token has to
+        // be asked for first.
+        await captureLauncherSession(selected.url, pending.email);
         nudgeDiscordLoginPoll();
         if (!gameWindow) {
-            play();
+            await play();
         }
         pushState();
     });
@@ -356,9 +373,16 @@ function openDiscordLogin() {
     return { ok: true };
 }
 
-// Signing in once is enough. The game window keeps the server session in its own
-// persistent cookie jar, so a remembered player goes straight into the game and only sees
-// the button again if they ask for it or the server stops recognising them.
+// Signing in once is enough -- but "once" used to mean "once per launch".
+//
+// The server's Discord hand-off is a two-minute record keyed by the player's address, and the
+// login packet spends it. Remembering the email here did not remember any of that, so the next
+// start opened the game with nothing for it to find, the SWF fell through to the password path,
+// and an account that was perfectly fine answered "wrong email or password".
+//
+// What is kept now is a device token the server issues after a real Discord sign-in
+// (lib/launcherSession.js). Redeeming it on the next start recreates exactly the hand-off the
+// OAuth callback would have, so the game page's own poll signs the player in as usual.
 function rememberDiscordLogin(email) {
     discordAccount = { linked: true, email: String(email || '') };
     remembered = true;
@@ -367,17 +391,71 @@ function rememberDiscordLogin(email) {
 
 function restoreDiscordLogin() {
     const saved = state.read();
-    if (!saved.discordLinkedAt) {
+    const cached = sessionCache.read();
+    if (!saved.discordLinkedAt && !cached.token) {
         return;
     }
-    discordAccount = { linked: true, email: saved.discordEmail };
+    discordAccount = { linked: true, email: cached.email || saved.discordEmail };
     remembered = true;
 }
 
 function forgetDiscordLogin() {
+    const { selected } = resolveSelectedServer();
+    const cached = sessionCache.read();
+    if (selected && cached.token) {
+        // Best effort: the local copy goes either way, and a token the server still holds
+        // expires on its own.
+        void discordAuth.forgetSession(selected.url, cached.token);
+    }
+    sessionCache.clear();
     discordAccount = { linked: false, email: '' };
     remembered = false;
     state.write({ discordEmail: '', discordLinkedAt: 0 });
+}
+
+/** Take the device token the server offers while this sign-in is still fresh. */
+async function captureLauncherSession(gameUrl, email) {
+    const issued = await discordAuth.issueSession(gameUrl);
+    if (!issued) {
+        // An older server, or one that did not offer one. The player is signed in for this
+        // session; the next start simply asks again, which is where we started.
+        return;
+    }
+    sessionCache.write(issued.token, issued.email || email);
+}
+
+/**
+ * Turn a saved token back into a sign-in, before the game window opens.
+ *
+ * Only an outright refusal (401) drops the saved sign-in -- a server that is old, down or slow
+ * must not sign the player out. Anything else carries on exactly as the launcher did before.
+ *
+ * @returns {Promise<{ resumed: boolean, expired: boolean }>}
+ */
+async function resumeLauncherSession(gameUrl) {
+    const cached = sessionCache.read();
+    if (!cached.token) {
+        return { resumed: false, expired: false };
+    }
+
+    const result = await discordAuth.resumeSession(gameUrl, cached.token);
+    if (result.ok) {
+        // The old token stopped working the moment the server answered, so the replacement is
+        // saved before anything else can fail.
+        sessionCache.write(result.token, result.email || cached.email);
+        rememberDiscordLogin(result.email || cached.email);
+        return { resumed: true, expired: false };
+    }
+
+    if (result.expired) {
+        sessionCache.clear();
+        discordAccount = { linked: false, email: '' };
+        remembered = false;
+        state.write({ discordEmail: '', discordLinkedAt: 0 });
+        return { resumed: false, expired: true };
+    }
+
+    return { resumed: false, expired: false };
 }
 
 async function refreshServerStatus() {
@@ -464,10 +542,12 @@ if (!app.requestSingleInstanceLock()) {
 
         social.start();
 
-        // A player who has signed in before is not asked again: the launcher goes
-        // straight into the game, which carries the server session in its own cookies.
+        // A player who has signed in before is not asked again: play() redeems the saved
+        // device token on the way, so the game page finds a sign-in waiting for it. If the
+        // token has been revoked or has expired, play() says so and the launcher window is
+        // already up with the Discord button on it.
         if (remembered && flashArmed) {
-            play();
+            void play();
         }
 
         app.on('activate', () => {
