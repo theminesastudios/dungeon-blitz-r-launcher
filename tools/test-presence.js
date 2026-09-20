@@ -217,23 +217,23 @@ async function main() {
     // A published portrait does not take the large image away from the area artwork. It used
     // to win that slot, which showed a character on a plain background and lost the one thing
     // the small icon does not already say: where the player is.
-    const withPortrait = await post(
-        port,
-        '/presence',
-        {
+    //
+    // Built directly rather than pushed, because every activity count below this point is
+    // absolute and one more push would shift them all.
+    {
+        const portraitActivity = bridge.buildActivity({
             ...PRESENCE_PAYLOAD,
             areaKey: 'blackrosemire',
             levelKey: 'SwampRoadNorth',
             levelName: 'Black Rose Mire',
             portraitUrl: 'http://dungeonblitzr.theminesa.studio/portraits/telahair.png'
-        },
-        GAME_ORIGIN
-    );
-    assert.strictEqual(withPortrait.status, 200);
-    const portraitActivity = discord.state.activities[discord.state.activities.length - 1].activity;
-    assert.strictEqual(portraitActivity.assets.large_image, 'blackrosemire', 'the area keeps the large image');
-    assert.strictEqual(portraitActivity.assets.small_image, 'warrior', 'and the class keeps the small one');
-    assert.ok(portraitActivity.buttons && portraitActivity.buttons.length === 1, 'the button is still there');
+        });
+        assert.strictEqual(portraitActivity.assets.large_image, 'blackrosemire', 'the area keeps the large image');
+        assert.strictEqual(portraitActivity.assets.large_text, 'Black Rose Mire');
+        assert.strictEqual(portraitActivity.assets.small_image, 'warrior', 'and the class keeps the small one');
+        assert.strictEqual(portraitActivity.secrets, undefined, 'and no join secret hides the button');
+        assert.ok(portraitActivity.buttons && portraitActivity.buttons.length === 1, 'the button is still there');
+    }
 
     // Back to the original area, so the dedupe check below compares like with like.
     await post(port, '/presence', PRESENCE_PAYLOAD, GAME_ORIGIN);
