@@ -178,7 +178,9 @@ async function main() {
     assert.strictEqual(activity.state, 'Idling in town');
     assert.strictEqual(activity.party.id, '7');
     assert.deepStrictEqual(activity.party.size, [2, 4], 'party size is a [current, max] pair');
-    assert.strictEqual(activity.secrets.join, 'join-secret');
+    // No join secret: Discord hides `buttons` behind Ask to Join the moment an activity
+    // carries `secrets`, and the Play Game button is the presence players actually had.
+    assert.strictEqual(activity.secrets, undefined, 'no join secret, so the button survives');
     assert.strictEqual(activity.assets.small_image, 'warrior');
     assert.strictEqual(activity.assets.small_text, 'BridgeProbe - Warrior');
     assert.strictEqual(activity.assets.large_image, 'home', 'CraftTown falls back to the home artwork');
@@ -211,6 +213,27 @@ async function main() {
     assert.strictEqual(unknown.status, 200);
     const unknownActivity = discord.state.activities[discord.state.activities.length - 1].activity;
     assert.strictEqual(unknownActivity.assets.large_image, 'moomooplain', 'an unknown area key passes through unchanged');
+
+    // A published portrait does not take the large image away from the area artwork. It used
+    // to win that slot, which showed a character on a plain background and lost the one thing
+    // the small icon does not already say: where the player is.
+    const withPortrait = await post(
+        port,
+        '/presence',
+        {
+            ...PRESENCE_PAYLOAD,
+            areaKey: 'blackrosemire',
+            levelKey: 'SwampRoadNorth',
+            levelName: 'Black Rose Mire',
+            portraitUrl: 'http://dungeonblitzr.theminesa.studio/portraits/telahair.png'
+        },
+        GAME_ORIGIN
+    );
+    assert.strictEqual(withPortrait.status, 200);
+    const portraitActivity = discord.state.activities[discord.state.activities.length - 1].activity;
+    assert.strictEqual(portraitActivity.assets.large_image, 'blackrosemire', 'the area keeps the large image');
+    assert.strictEqual(portraitActivity.assets.small_image, 'warrior', 'and the class keeps the small one');
+    assert.ok(portraitActivity.buttons && portraitActivity.buttons.length === 1, 'the button is still there');
 
     // Back to the original area, so the dedupe check below compares like with like.
     await post(port, '/presence', PRESENCE_PAYLOAD, GAME_ORIGIN);
