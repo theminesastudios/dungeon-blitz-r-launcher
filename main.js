@@ -20,7 +20,7 @@ const GAME_WINDOW_DEFAULTS = { width: 1200, height: 800, minWidth: 800, minHeigh
 const BACKGROUND_COLOR = '#484955';
 
 // Electron derives the user data folder from package.json's name, so renaming the package
-// would stranded every player's saved sign-in in the old folder. Pinning it outright keeps
+// would strand every player's saved sign-in in the old folder. Pinning it outright keeps
 // that folder fixed whatever the package is called. setName alone is not enough: the
 // default path is resolved before this script runs.
 const APP_DIRECTORY_NAME = 'dungeon-blitz-r-launcher';
