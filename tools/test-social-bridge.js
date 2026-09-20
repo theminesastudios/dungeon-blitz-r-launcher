@@ -140,7 +140,13 @@ function startMockDiscordIpc(directory) {
     });
 
     return new Promise((resolve) => {
-        server.listen(path.join(directory, 'discord-ipc-0'), () => resolve({ server, seen }));
+        // Windows has no unix sockets: the mock takes the named-pipe form, under the
+        // same test-only name the socket-name override gave socketPaths().
+        const endpoint =
+            process.platform === 'win32'
+                ? '\\\\.\\pipe\\dblr-test-discord-ipc-0'
+                : path.join(directory, 'discord-ipc-0');
+        server.listen(endpoint, () => resolve({ server, seen }));
     });
 }
 
@@ -192,8 +198,10 @@ function baseConfig({ tokenCachePath, mockUrl, overrides }) {
 /** Phase 1: the Discord client authorizes, no browser and no redirect involved. */
 async function testDiscordAuthorization(mock, mockUrl, tmp) {
     // macOS caps a unix socket path at ~104 characters, so this one lives directly
-    // under /tmp rather than inside the test's own (long) temp directory.
-    const directory = fs.mkdtempSync(path.join('/tmp', 'dipc-'));
+    // under /tmp rather than inside the test's own (long) temp directory. Windows has
+    // no such cap -- it uses named pipes -- and has no /tmp, so it gets the temp dir.
+    const socketRoot = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+    const directory = fs.mkdtempSync(path.join(socketRoot, 'dipc-'));
     // Both of the variables discordIpc.js consults, in its order of preference.
     //
     // Setting TMPDIR alone passes on macOS and fails on any Linux with a systemd user
@@ -203,10 +211,14 @@ async function testDiscordAuthorization(mock, mockUrl, tmp) {
     // right: that is where Discord actually keeps its socket on Linux.
     const previousEnv = {
         TMPDIR: process.env.TMPDIR,
-        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR
+        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+        DUNGEON_BLITZ_DISCORD_SOCKET_NAME: process.env.DUNGEON_BLITZ_DISCORD_SOCKET_NAME
     };
     process.env.TMPDIR = `${directory}/`;
     process.env.XDG_RUNTIME_DIR = directory;
+    // A name of our own, so a real Discord running on this machine -- which holds
+    // discord-ipc-0 outright on Windows -- and the mock never fight over a pipe.
+    process.env.DUNGEON_BLITZ_DISCORD_SOCKET_NAME = 'dblr-test-';
     const ipc = await startMockDiscordIpc(directory);
 
     const tokenCachePath = path.join(tmp, 'token-discord.json');
@@ -373,7 +385,11 @@ async function testBrowserAuthorization(mock, mockUrl, tmp) {
     assert.strictEqual(lobbyReady.lobbyId, 'lobby-1');
 
     try {
-        assert.strictEqual(fs.statSync(tokenCachePath).mode & 0o777, 0o600, 'the token cache stays private');
+        // POSIX mode bits only exist there; Windows keeps the file private through the
+        // user's own profile directory instead of a 0o600 bit.
+        if (process.platform !== 'win32') {
+            assert.strictEqual(fs.statSync(tokenCachePath).mode & 0o777, 0o600, 'the token cache stays private');
+        }
         // Outbound chat still works on this path too.
         const sent = await bridge.sendChat({ lobbyId: 'lobby-1', apiBaseUrl: mockUrl }, 'browser path');
         assert.ok(sent.ok);
