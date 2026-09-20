@@ -194,8 +194,19 @@ async function testDiscordAuthorization(mock, mockUrl, tmp) {
     // macOS caps a unix socket path at ~104 characters, so this one lives directly
     // under /tmp rather than inside the test's own (long) temp directory.
     const directory = fs.mkdtempSync(path.join('/tmp', 'dipc-'));
-    const previousTmpDir = process.env.TMPDIR;
+    // Both of the variables discordIpc.js consults, in its order of preference.
+    //
+    // Setting TMPDIR alone passes on macOS and fails on any Linux with a systemd user
+    // session -- a CI runner included -- because XDG_RUNTIME_DIR wins there, so the bridge
+    // went looking in the runner's real runtime directory, never found the mock socket, and
+    // the test timed out on a lobby that was never authorized. The precedence itself is
+    // right: that is where Discord actually keeps its socket on Linux.
+    const previousEnv = {
+        TMPDIR: process.env.TMPDIR,
+        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR
+    };
     process.env.TMPDIR = `${directory}/`;
+    process.env.XDG_RUNTIME_DIR = directory;
     const ipc = await startMockDiscordIpc(directory);
 
     const tokenCachePath = path.join(tmp, 'token-discord.json');
@@ -243,7 +254,15 @@ async function testDiscordAuthorization(mock, mockUrl, tmp) {
         bridge.stop();
         await started;
         ipc.server.close();
-        process.env.TMPDIR = previousTmpDir;
+        // Restored exactly, including "was not set": assigning undefined would leave the
+        // string "undefined" behind and send the next lookup to a directory of that name.
+        for (const [name, value] of Object.entries(previousEnv)) {
+            if (value === undefined) {
+                delete process.env[name];
+            } else {
+                process.env[name] = value;
+            }
+        }
         fs.rmSync(directory, { recursive: true, force: true });
     }
 
