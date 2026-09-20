@@ -1,0 +1,38 @@
+name: Tests
+
+# The launcher's guards are the parts a player never sees fail: the Flash start guard, the
+# rich-presence mapping, the chat mirror and the window's status rows. Each of them used to
+# be checkable only by hand, which is how a broken build shipped. They run here on every
+# push, before any installer is built.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suites:
+    name: Launcher test suites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The suites read no plugin or bridge binaries, only source.
+          lfs: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Electron's binary is not needed by the suites: they drive the modules directly.
+      - name: Run test suites
+        run: npm test

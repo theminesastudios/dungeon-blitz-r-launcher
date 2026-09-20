@@ -1,11 +1,14 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 
-const bridge = require('./lib/bridge');
+const { ChatRelay } = require('./lib/chatRelay');
 const discordAuth = require('./lib/discordAuth');
-const { findFlashPlugin } = require('./lib/flash');
+const { exists, inspectInstallLocation, isWritableDirectory } = require('./lib/install');
+const { findFlashPlugin, findVendoredPlugin } = require('./lib/flash');
+const { PresenceBridge } = require('./lib/presence');
 const { SocialBridge } = require('./lib/social');
 const { createSessionCache } = require('./lib/launcherSession');
 const {
@@ -37,15 +40,28 @@ const social = new SocialBridge({
 });
 const sessionCache = createSessionCache(path.join(app.getPath('userData'), 'launcher-session.json'));
 
+// Rich presence is served by the launcher itself. The multiplayer server's own bridge
+// cannot be used from a packaged build, and its absence used to be silent: presence just
+// never appeared. See lib/presence.js.
+const presence = new PresenceBridge({ launcherConfig: loadLauncherConfig() });
+
+// Game chat and the player's Discord lobby are mirrored for the length of a game session.
+// The game server does the reading and the printing; this side only carries the lines.
+const chatRelay = new ChatRelay({ social });
+chatRelay.on('state', () => pushState());
+
 let launcherWindow = null;
 let gameWindow = null;
 let loginWatcher = null;
 let flashPlugin = null;
 let flashArmed = false;
 let currentGameOrigin = '';
-let discordAccount = { linked: false, email: '' };
+let discordAccount = { linked: false, email: '', name: '' };
 let remembered = false;
 let serverReachable = null;
+// Set once at startup: a copy running from a mounted disk image or from Downloads is a copy
+// nobody will notice going stale.
+let installLocation = { relocate: false, reason: '', bundlePath: '', targetPath: '', message: '' };
 
 function locateFlash(preferredPath) {
     return findFlashPlugin({
@@ -93,6 +109,74 @@ function resolveSelectedServer() {
     return { servers, selected };
 }
 
+/**
+ * A packaged launcher always carries its own Flash plugin. One that does not is an
+ * incomplete build -- a stale install, or a package assembled without running
+ * tools/extract-flash -- and it can never play unless the player happens to have their
+ * own Flash install. Refusing to start says so outright instead of leaving players on a
+ * sign-in screen that leads nowhere.
+ *
+ * A development checkout is exempt: there, a missing plugin is one `npm run extract-flash`
+ * away and the window already explains it. DUNGEON_BLITZ_ALLOW_NO_FLASH=1 keeps a
+ * deliberately Flash-less build startable.
+ */
+function buildIsPlayable() {
+    if (!app.isPackaged || flashArmed) {
+        return true;
+    }
+    return process.env.DUNGEON_BLITZ_ALLOW_NO_FLASH === '1';
+}
+
+function refuseToStart() {
+    const vendored = findVendoredPlugin();
+    const detail = [
+        'This copy of the launcher has no Flash plugin, so the game could not start even after signing in.',
+        '',
+        `Running from: ${app.getAppPath()}`,
+        'This is an incomplete or outdated build.',
+        '',
+        'Fix: install the current build again from the .dmg or .zip, or in a development',
+        'checkout run `npm run extract-flash` and start it there.',
+        '',
+        'To start anyway (a deliberately Flash-less build), set DUNGEON_BLITZ_ALLOW_NO_FLASH=1.'
+    ].join('\n');
+
+    console.log('[Flash] Refusing to start: this build carries no Flash plugin.');
+    if (vendored) {
+        console.log(`[Flash] (a vendored plugin was found at ${vendored} but could not be armed)`);
+    }
+    dialog.showErrorBox('Dungeon Blitz: R cannot start', detail);
+    app.exit(1);
+}
+
+/**
+ * The lobby-chat state the launcher window shows, in one small object. The bridge is
+ * deliberately quiet until the game starts, so "idle" is a normal state, not a fault.
+ */
+function socialSummary() {
+    const snapshot = social.snapshot();
+    return {
+        enabled: process.env.DUNGEON_BLITZ_SOCIAL !== '0' && social.isAvailable(),
+        running: Boolean(snapshot.running),
+        lobbyReady: Boolean(snapshot.lobbyReady),
+        authPending: Boolean(snapshot.auth),
+        lobbyId: String(snapshot.lobbyId || ''),
+        lastStatus: String(snapshot.lastStatus || '')
+    };
+}
+
+function presenceSummary() {
+    const snapshot = presence.snapshot();
+    return {
+        running: Boolean(snapshot.running),
+        ready: Boolean(snapshot.ready),
+        port: Number(snapshot.port) || 0,
+        characterName: String(snapshot.characterName || ''),
+        activity: String(snapshot.activity || ''),
+        lastError: String(snapshot.lastError || '')
+    };
+}
+
 function flashStatus() {
     if (!flashPlugin) {
         return {
@@ -119,6 +203,19 @@ function flashStatus() {
     };
 }
 
+/** What the chat mirror is doing, for the window's status strip. */
+function chatSummary() {
+    const snapshot = chatRelay.snapshot();
+    return {
+        enabled: process.env.DUNGEON_BLITZ_CHAT_RELAY !== '0',
+        running: Boolean(snapshot.running),
+        supported: snapshot.supported,
+        relayed: Number(snapshot.relayed) || 0,
+        received: Number(snapshot.received) || 0,
+        lastError: String(snapshot.lastError || '')
+    };
+}
+
 function launcherState() {
     const { servers, selected } = resolveSelectedServer();
 
@@ -129,6 +226,17 @@ function launcherState() {
         serverReachable,
         gameRunning: Boolean(gameWindow && !gameWindow.isDestroyed()),
         flash: flashStatus(),
+        presence: presenceSummary(),
+        social: socialSummary(),
+        chat: chatSummary(),
+        install: {
+            relocate: Boolean(installLocation.relocate),
+            reason: String(installLocation.reason || ''),
+            message: String(installLocation.message || ''),
+            sourcePath: String(installLocation.bundlePath || ''),
+            targetPath: String(installLocation.targetPath || ''),
+            canMove: Boolean(installLocation.targetPath)
+        },
         discord: {
             ...discordAccount,
             remembered,
@@ -146,6 +254,10 @@ function pushState() {
 // The Social SDK runs headless: it puts the player in the Discord lobby, and Discord's
 // own client is where lobby chat and the party roster are read. Nothing to render here.
 let lastLoggedSocialStatus = '';
+// Presence changes (Discord reached, character changed, Discord closed) belong in the
+// status strip for the same reason: the window is where this is checked.
+presence.on('state', () => pushState());
+
 social.on('state', (snapshot) => {
     // Patches that carry no status (a lobby_ready's running flag, stop()) re-surface the
     // previous status; logging only changes keeps the console one-line-per-event.
@@ -153,6 +265,14 @@ social.on('state', (snapshot) => {
         lastLoggedSocialStatus = snapshot.lastStatus;
         console.log(`[Social] ${snapshot.lastStatus}`);
     }
+
+    // The bridge knows the Discord account it authorized as; keeping that is what lets the
+    // launcher greet the player by name without another sign-in.
+    if (snapshot.username && snapshot.username !== discordAccount.name) {
+        rememberDiscordLogin(discordAccount.email, snapshot.username);
+    }
+    // The window shows the bridge state, so every change has to reach it.
+    pushState();
 });
 
 function createLauncherWindow() {
@@ -301,7 +421,11 @@ function createGameWindow(url) {
     gameWindow.on('closed', () => {
         gameWindow = null;
         currentGameOrigin = '';
-        bridge.stop();
+        // Presence and lobby chat belong to a game session, so closing the game ends
+        // both; keeping them up would leave the player shown as playing nothing.
+        presence.stop();
+        chatRelay.stop();
+        stopAccountPolling();
         if (launcherWindow && !launcherWindow.isDestroyed()) {
             launcherWindow.show();
         }
@@ -310,6 +434,8 @@ function createGameWindow(url) {
 
     gameWindow.once('ready-to-show', () => gameWindow.show());
     gameWindow.loadURL(url);
+    // Whoever the game ends up signing in as is remembered for the next launch.
+    startAccountPolling();
 }
 
 async function play(serverId) {
@@ -350,8 +476,10 @@ async function play(serverId) {
 
     state.write({ serverId: selected.id });
 
-    // Before the window, not after: the game page begins polling for a pending sign-in as soon
-    // as it loads, and the point of the saved token is that there is already one waiting.
+    // Before the window, not after: the game page begins polling for a pending sign-in as
+    // soon as it loads, and the point of the saved token is that there is already one
+    // waiting. An expired token is the one case that stops the launch: continuing would
+    // drop the player into the SWF's password path with a perfectly good account.
     const resumed = await resumeLauncherSession(selected.url);
     if (resumed.expired) {
         pushState();
@@ -361,8 +489,24 @@ async function play(serverId) {
         };
     }
 
-    if (state.read().startDiscordBridge) {
-        bridge.start({ clientUrl: selected.url, launcherConfig: loadLauncherConfig() });
+    const settings = state.read();
+    if (settings.startDiscordBridge) {
+        presence.start({ serverUrl: selected.url, gameWindowPid: process.pid });
+    }
+
+    // The game's own chat and the Discord lobby are mirrored in both directions for as
+    // long as the game window is open.
+    if (settings.startSocialBridge && process.env.DUNGEON_BLITZ_SOCIAL !== '0' && process.env.DUNGEON_BLITZ_CHAT_RELAY !== '0') {
+        chatRelay.start({ serverUrl: selected.url });
+    }
+
+    // Lobby chat belongs to a game session. Starting the social bridge here rather than
+    // at launch is what keeps the launcher from opening a browser for Discord
+    // authorization before the player has asked for anything; once it starts, the
+    // session is exactly what it always was. Repeated plays are no-ops -- the bridge
+    // returns early while it is already running.
+    if (settings.startSocialBridge && process.env.DUNGEON_BLITZ_SOCIAL !== '0') {
+        social.start();
     }
 
     createGameWindow(selected.url);
@@ -418,18 +562,28 @@ function openDiscordLogin() {
 
 // Signing in once is enough -- but "once" used to mean "once per launch".
 //
-// The server's Discord hand-off is a two-minute record keyed by the player's address, and the
-// login packet spends it. Remembering the email here did not remember any of that, so the next
-// start opened the game with nothing for it to find, the SWF fell through to the password path,
-// and an account that was perfectly fine answered "wrong email or password".
-//
-// What is kept now is a device token the server issues after a real Discord sign-in
-// (lib/launcherSession.js). Redeeming it on the next start recreates exactly the hand-off the
-// OAuth callback would have, so the game page's own poll signs the player in as usual.
-function rememberDiscordLogin(email) {
-    discordAccount = { linked: true, email: String(email || '') };
+// The server's Discord hand-off is a two-minute record keyed by the player's address, and
+// the login packet spends it. What is kept now is a device token the server issues after a
+// real Discord sign-in (lib/launcherSession.js); redeeming it on the next start recreates
+// exactly the hand-off the OAuth callback would have, so the game page's own poll signs the
+// player in as usual. The account *name* is kept on top of that, so the window can greet a
+// returning player instead of offering the sign-in button again.
+function rememberDiscordLogin(email, name) {
+    const nextEmail = String(email || '').trim();
+    const nextName = String(name || '').trim();
+    const changed = nextEmail !== discordAccount.email || nextName !== discordAccount.name || !discordAccount.linked;
+
+    discordAccount = { linked: true, email: nextEmail, name: nextName || discordAccount.name };
     remembered = true;
-    state.write({ discordEmail: discordAccount.email, discordLinkedAt: Date.now() });
+
+    // Written only on a change: this runs from a poll.
+    if (changed) {
+        state.write({
+            discordEmail: discordAccount.email,
+            discordName: discordAccount.name,
+            discordLinkedAt: Date.now()
+        });
+    }
 }
 
 function restoreDiscordLogin() {
@@ -438,7 +592,13 @@ function restoreDiscordLogin() {
     if (!saved.discordLinkedAt && !cached.token) {
         return;
     }
-    discordAccount = { linked: true, email: cached.email || saved.discordEmail };
+    // The session cache is the authority on the email -- it is what the token was issued
+    // against -- and the saved name is the display the window shows.
+    discordAccount = {
+        linked: true,
+        email: cached.email || saved.discordEmail,
+        name: saved.discordName || discordAccount.name
+    };
     remembered = true;
 }
 
@@ -451,9 +611,60 @@ function forgetDiscordLogin() {
         void discordAuth.forgetSession(selected.url, cached.token);
     }
     sessionCache.clear();
-    discordAccount = { linked: false, email: '' };
+    discordAccount = { linked: false, email: '', name: '' };
     remembered = false;
-    state.write({ discordEmail: '', discordLinkedAt: 0 });
+    state.write({ discordEmail: '', discordName: '', discordLinkedAt: 0 });
+}
+
+/**
+ * Reads back the account the player is actually playing as.
+ *
+ * A player who signs in inside the game -- the SWF's own Discord flow, or simply a
+ * session that outlived the launcher -- never touches the launcher's sign-in button, so
+ * the launcher used to ask again on the next launch. The server can tell who is behind
+ * the connection that is asking, and only while that connection is in the game, so this
+ * runs while a game session is up and remembers what it finds.
+ */
+async function refreshDiscordAccount() {
+    const { selected } = resolveSelectedServer();
+    if (!selected) {
+        return;
+    }
+
+    const account = await discordAuth.fetchDiscordAccount(selected.url);
+    if (!account || !account.linked) {
+        return;
+    }
+
+    const name = account.globalName || account.username || discordAccount.name;
+    if (!discordAccount.linked || name !== discordAccount.name || account.email !== discordAccount.email) {
+        rememberDiscordLogin(account.email, name);
+        pushState();
+    }
+}
+
+// The game session appears a few seconds after the window opens, so the account is looked
+// up again for a short while rather than once at the wrong moment.
+let accountPollTimer = null;
+let accountPollAttempts = 0;
+
+function startAccountPolling() {
+    stopAccountPolling();
+    accountPollAttempts = 0;
+    accountPollTimer = setInterval(() => {
+        accountPollAttempts += 1;
+        void refreshDiscordAccount();
+        if (discordAccount.linked || accountPollAttempts >= 12) {
+            stopAccountPolling();
+        }
+    }, 5000);
+}
+
+function stopAccountPolling() {
+    if (accountPollTimer) {
+        clearInterval(accountPollTimer);
+        accountPollTimer = null;
+    }
 }
 
 /** Take the device token the server offers while this sign-in is still fresh. */
@@ -514,6 +725,79 @@ async function refreshServerStatus() {
     pushState();
 }
 
+/**
+ * Puts this copy where it belongs and restarts from there.
+ *
+ * The copy is what updates stop reaching and what the player stops recognising; offering
+ * the move is the difference between a warning nobody acts on and a one-click fix.
+ */
+function moveToApplications() {
+    const target = String(installLocation.targetPath || '');
+    const source = String(installLocation.bundlePath || '');
+    if (!target || !source) {
+        return { ok: false, message: 'This build cannot move itself. Install it again from the installer.' };
+    }
+
+    if (!isWritableDirectory(path.dirname(target))) {
+        return { ok: false, message: `${path.dirname(target)} is not writable by this user.` };
+    }
+
+    try {
+        if (exists(target)) {
+            fs.rmSync(target, { recursive: true, force: true });
+        }
+        // ditto is the macOS way to copy a bundle: it preserves symlinks, permissions and
+        // the app's signature, which a plain recursive copy does not.
+        require('child_process').execFileSync('ditto', [source, target], { stdio: 'ignore' });
+    } catch (error) {
+        return { ok: false, message: `Could not copy the launcher: ${(error && error.message) || error}` };
+    }
+
+    console.log(`[Install] Moved to ${target}`);
+
+    const executableInBundle = app.getPath('exe').replace(source, '');
+    app.relaunch({ execPath: path.join(target, executableInBundle) });
+    app.exit(0);
+    return { ok: true };
+}
+
+/**
+ * The standalone warning, for a player who launched from a disk image and never opens the
+ * window's own banner.
+ */
+async function warnAboutInstallLocation() {
+    if (!installLocation.relocate) {
+        return;
+    }
+
+    const buttons = installLocation.targetPath ? ['Move to Applications', 'Not now'] : ['OK'];
+    const options = {
+        type: 'warning',
+        title: 'This copy cannot update itself',
+        message: installLocation.message,
+        detail: [
+            installLocation.targetPath ? `Move it to: ${installLocation.targetPath}` : '',
+            'Running the current build is what keeps Flash arming and lobby chat working.'
+        ]
+            .filter(Boolean)
+            .join('\n'),
+        buttons,
+        defaultId: 0,
+        cancelId: buttons.length - 1
+    };
+    const result =
+        launcherWindow && !launcherWindow.isDestroyed()
+            ? await dialog.showMessageBox(launcherWindow, options)
+            : await dialog.showMessageBox(options);
+
+    if (result.response === 0 && installLocation.targetPath) {
+        const moved = moveToApplications();
+        if (!moved.ok) {
+            dialog.showErrorBox('Could not move the launcher', String(moved.message || ''));
+        }
+    }
+}
+
 function registerIpc() {
     ipcMain.handle('launcher:getState', () => launcherState());
 
@@ -557,6 +841,8 @@ function registerIpc() {
         app.exit(0);
     });
 
+    ipcMain.handle('launcher:moveToApplications', () => moveToApplications());
+
     ipcMain.handle('launcher:play', () => play());
     ipcMain.handle('launcher:quit', () => app.quit());
 }
@@ -577,17 +863,24 @@ if (!app.requestSingleInstanceLock()) {
 
     armFlash();
     restoreDiscordLogin();
+    installLocation = inspectInstallLocation({ isPackaged: app.isPackaged, appPath: app.getAppPath() });
+    if (installLocation.relocate) {
+        console.warn(`[Install] ${installLocation.message} (running from ${installLocation.bundlePath})`);
+    }
     registerIpc();
 
     app.whenReady().then(() => {
+        if (!buildIsPlayable()) {
+            refuseToStart();
+            return;
+        }
+
         createLauncherWindow();
         void refreshServerStatus();
-
-        // DUNGEON_BLITZ_SOCIAL=0 keeps the bridge offline -- for headless smoke tests
-        // that must not open a browser or reach Discord.
-        if (process.env.DUNGEON_BLITZ_SOCIAL !== '0') {
-            social.start();
-        }
+        void warnAboutInstallLocation();
+        // Covers a session that outlived the launcher: the account is there to be found
+        // even before a game window is opened.
+        void refreshDiscordAccount();
 
         // A player who has signed in before is not asked again: play() redeems the saved
         // device token on the way, so the game page finds a sign-in waiting for it. If the
@@ -605,7 +898,8 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     app.on('window-all-closed', () => {
-        bridge.stop();
+        presence.stop();
+        chatRelay.stop();
         social.stop();
         if (process.platform !== 'darwin') {
             app.quit();
@@ -613,7 +907,8 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     app.on('before-quit', () => {
-        bridge.stop();
+        presence.stop();
+        chatRelay.stop();
         social.stop();
     });
 }

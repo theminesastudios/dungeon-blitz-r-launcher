@@ -6,5 +6,7 @@
   "executablePath": "",
   "jsBridge": true,
   "clientSecret": "",
+  "discordIpc": true,
+  "browserFallback": false,
   "pollIntervalMs": 2000
 }

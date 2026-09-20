@@ -1,0 +1,17 @@
+{
+  "appId": "1447954255452311695",
+  "port": 47631,
+  "presenceUrl": "",
+  "joinUrl": "",
+  "playGameUrl": "https://theminesa.studio/dungeon-blitz-r",
+  "characterName": "",
+  "pollMs": 4000,
+  "largeImageText": "Dungeon Blitz: R",
+  "smallImageKey": "dungeon_blitz",
+  "smallImageText": "Dungeon Blitz: R",
+  "largeImageHomeKey": "home",
+  "largeImageDungeonKey": "indungeon",
+  "largeImageNewbieRoadKey": "newbieroad",
+  "logPayloads": false,
+  "allowedPresenceOrigins": ["theminesa.studio", "*.theminesa.studio"]
+}

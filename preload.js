@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('launcher', {
     forgetDiscordLogin: () => ipcRenderer.invoke('launcher:forgetDiscordLogin'),
     play: () => ipcRenderer.invoke('launcher:play'),
     browseFlash: () => ipcRenderer.invoke('launcher:browseFlash'),
+    moveToApplications: () => ipcRenderer.invoke('launcher:moveToApplications'),
     relaunch: () => ipcRenderer.invoke('launcher:relaunch'),
     quit: () => ipcRenderer.invoke('launcher:quit'),
     onState: (handler) => {

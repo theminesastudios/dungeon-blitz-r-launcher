@@ -7,9 +7,9 @@ The launcher is a sign-in screen, not a control panel. It asks for one thing —
 with Discord — and once that is done it opens the game window and connects to the server.
 A player who has signed in before is not asked again.
 
-In the background it also arms the Flash plugin, runs the Discord Social SDK bridge so
-lobby chat and the party roster work inside Discord, and starts the rich-presence bridge
-when a game-server checkout is available.
+In the background it also arms the Flash plugin, connects the player's Discord lobby so
+lobby chat works, publishes Discord rich presence, and mirrors the player's in-game chat
+into that lobby — in both directions — for as long as the game window is open.
 
 ## Why Electron 11
 
@@ -56,6 +56,24 @@ node tools/extract-flash.js --from "/path/to/FlashBrowser" --platform darwin
 If nothing is vendored, the launcher scans the player's own Flash installations and, as a
 last resort, asks for the path on the sign-in screen.
 
+A **packaged** launcher always ships its own plugin, so one that finds nothing at all
+refuses to start: it shows an error box naming the path it is running from and quits,
+rather than leaving a player on a sign-in screen that leads nowhere. That is the shape a
+stale or incompletely built install takes — see `DUNGEON_BLITZ_ALLOW_NO_FLASH=1` for a
+deliberately Flash-less build. Development checkouts are exempt: there, a missing plugin
+is one `npm run extract-flash` away, and the launcher window says so.
+
+The sign-in screen carries a four-row status strip — `Flash`, `Discord status`, `Lobby
+chat` and `In-game chat` — showing the plugin that was armed (version and source, or
+`missing`), whether Discord has a presence for the player, and what each chat direction is
+doing. Hovering a value shows the plugin path, the local presence endpoint, or the last
+error. `main.js` prints the same Flash line on the console, and
+`node tools/test-launcher-status.js` checks every state of that strip.
+
+Once an account is known the sign-in button is replaced by `Signed in as <name>` — whether
+the sign-in happened in the launcher or inside the game, where the SWF's own Discord flow
+lands the player (see [Remembered account](#remembered-account)).
+
 | Platform | File | Where it comes from |
 | --- | --- | --- |
 | Windows | `pepflashplayer64.dll` | FlashBrowser (Windows) |
@@ -70,6 +88,76 @@ Linux.
 On purpose. The last Flash plugin is an x86_64 binary and a PPAPI plugin must match the
 architecture of the process hosting it, so an arm64 build would start and then never find a
 usable plugin. Apple Silicon runs this build under Rosetta, and CI uses the Intel runner.
+
+## Discord rich presence
+
+Rich presence is served **by the launcher itself** (`lib/presence.js`). The game page
+pushes its state to a fixed local address (`http://127.0.0.1:47631/presence`), and the
+launcher maps that onto a Discord activity — details, state, party size and join secret,
+level artwork, the discipline icon and a `Play Game` button — and sends it over the same
+RPC socket the sign-in uses (`SET_ACTIVITY`). Party joins from Discord are handed to the
+game server's `/api/presence/discord-join`.
+
+That endpoint is the same one the game server's own bridge exposes, so the page needs no
+changes. The launcher does it itself because a packaged build cannot use the server's
+bridge at all: the server checkout is not inside the app, and the only Node runtime a
+packaged Electron carries is v12 (Electron 11), which cannot load that bridge's
+dependencies (express 5 needs Node 18 and `node:`-prefixed builtins). It used to be spawned
+with its output discarded, so it died silently and presence never appeared.
+
+`presence.config.json` holds the application id, port, artwork keys and the origins allowed
+to push; a side-by-side game checkout's `discord-bridge.config.json` overrides it when
+present, so an existing bridge setup keeps working. Discord does not have to be running to
+play — the bridge retries in the background and the `Discord status` row says what is
+happening.
+
+```bash
+node tools/test-presence.js   # publish, dedupe, origin refusal and clearing, against a mock Discord socket
+```
+
+## Game chat, mirrored
+
+Flash chat cannot be read from the launcher and the server's relay needs either the native
+Social SDK (no macOS build) or a bot token, so the game server publishes the player's own
+public chat lines on a small feed and takes lines back for printing in game:
+
+```text
+GET  /api/chat/outbound?since=<cursor>   -> { cursor, messages: [{ senderName, message }] }
+POST /api/chat/inbound                   -> prints "[Discord] name: message" in game
+```
+
+`lib/chatRelay.js` polls that feed while the game window is open and hands each line to the
+social bridge, which posts it to the player's lobby; lobby chat comes back the other way
+and is printed in game. Only **the local player's own** lines come down the feed, so a
+message is mirrored exactly once — by its author's launcher — instead of once per player in
+the room, and each line is sent once even if the lobby is briefly unavailable (the queue
+retries). A server without the feed answers 404 and the `In-game chat` row says so, rather
+than polling forever. Disable it with `DUNGEON_BLITZ_CHAT_RELAY=0`.
+
+```bash
+node tools/test-chat-relay.js   # relay, dedupe, queueing and unsupported servers, against a local mock
+```
+
+## Remembered account
+
+The launcher's own sign-in writes the account to `launcher-state.json`. A player who signed
+in *inside the game* never touches that button, so the launcher also reads the account back
+from the server (`GET /api/discord/account`, resolved from the connection asking — which is
+why it is polled while a game session is up) and against the social bridge's own Discord
+identity. Either way the next launch shows `Signed in as <name>` instead of asking again;
+`Use a different account` clears it.
+
+## Running from a disk image or Downloads
+
+A copy opened straight out of a mounted `.dmg`, or from the Downloads folder it was
+unzipped into, is a copy the next build will not replace — the quiet way a player ends up
+on a launcher that no longer works. The launcher warns once at startup, keeps a banner in
+the window, and offers `Move to Applications`: it copies itself with `ditto`, restarts from
+the new location and exits. A development checkout is never flagged.
+
+```bash
+node tools/test-install-location.js
+```
 
 ## Discord Social SDK bridge
 
@@ -101,13 +189,25 @@ and PulseAudio. Copy the result into `payload/social/<platform>/`.
 **No macOS build of the Social SDK exists.** On darwin (and wherever the native binary is
 absent) the launcher falls back to a built-in JavaScript driver — `lib/socialJs.js` over
 `lib/socialRest.js`, modelled on `@minesa-org/mini-interaction`'s `DiscordRestClient` —
-which speaks the same protocol events to Discord's HTTP lobby API: PKCE sign-in in the
-player's browser, create-or-join by lobby secret, linked-channel relay and message
-polling. It needs the application to allow the `openid identify sdk.social_layer` scopes
-and to register the loopback redirect `http://127.0.0.1/callback`.
+which speaks the same protocol events to Discord's HTTP lobby API: create-or-join by
+lobby secret, linked-channel relay and message polling. It starts with the game, not with
+the launcher, so nothing asks for Discord authorization until the player opens the game.
+
+Authorization happens **inside the Discord client**: `lib/discordIpc.js` speaks Discord's
+local RPC socket (`discord-ipc-0`), and its `AUTHORIZE` command raises Discord's own
+consent dialog. The code it returns is swapped for a token with a PKCE verifier, so the
+launcher never ships a client secret and never opens a browser. The token is cached in
+`discord-social-token.json` (mode 0600) in the launcher's user-data folder — the launcher
+never touches the macOS Keychain.
+
+Requirements: the application must allow the `openid identify sdk.social_layer` scopes,
+and the player must have the Discord desktop client running. `browserFallback: true` in
+`social.config.json` additionally enables the browser flow, which then also needs the
+loopback redirect `http://127.0.0.1/callback` registered for the application.
 
 ```bash
-node tools/test-social-bridge.js   # drives the JS bridge against a local mock of Discord
+node tools/test-social-bridge.js   # Discord-client and browser auth against local mocks
+node tools/test-discord-ipc.js     # the RPC client itself, against a mock Discord socket
 ```
 
 **`deviceFlow` must stay off.** The device path requires the Discord application to allow
@@ -170,11 +270,34 @@ macOS, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for no
 Targets live in `servers.json`. There is no server picker in the UI; the launcher uses the
 saved choice from `launcher-state.json` in the user data folder, or `defaultServerId`.
 
+## Tests
+
+```bash
+npm test
+```
+
+Every suite runs without Electron, Discord, a game server or a plugin binary: each drives
+the module against a local mock.
+
+| Suite | What it pins down |
+| --- | --- |
+| `tools/test-presence.js` | Activity mapping, dedupe, origin refusal, clearing, against a mock Discord socket |
+| `tools/test-chat-relay.js` | Own-chat mirroring once, queueing while the lobby is down, inbound printing, unsupported servers |
+| `tools/test-social-bridge.js` | Discord-client and browser authorization paths, lobby join, two-way chat |
+| `tools/test-discord-ipc.js` | The RPC framing, `AUTHORIZE` payload and PING/PONG |
+| `tools/test-launcher-status.js` | Every state of the status strip and the account row |
+| `tools/test-install-location.js` | Disk-image and Downloads detection, and what is deliberately not flagged |
+
+`.github/workflows/tests.yml` runs them on every push and pull request, so a broken Flash
+guard, presence mapping or chat relay fails before an installer is built.
+
 ## Optional: the game repository
 
-The rich-presence bridge and the server's own Social SDK settings come from a checkout of
-the game repository. The launcher looks for it next to this one, and
-`DUNGEON_BLITZ_SERVER_ROOT` overrides that. Without it those two features simply stay off.
+Only the server's own Social SDK settings (`discord-social-bridge.config.json`) and the
+presence overrides (`discord-bridge.config.json`) come from a checkout of the game
+repository. The launcher looks for it next to this one, and `DUNGEON_BLITZ_SERVER_ROOT`
+overrides that. Without it the launcher uses its own `social.config.json` and
+`presence.config.json`, which is what a packaged build does.
 
 ## Game window shortcuts
 
@@ -187,8 +310,9 @@ the game repository. The launcher looks for it next to this one, and
 ## Security notes
 
 - The launcher shell runs with `contextIsolation: true`, `nodeIntegration: false` and
-  plugins disabled; its only contact with the main process is the seven IPC calls in
-  `preload.js`.
+  plugins disabled; its only contact with the main process is the fixed set of IPC calls in
+  `preload.js` (state, sign-in, forget, play, choose plugin, move to Applications, relaunch,
+  quit) and it loads no remote content at all.
 - Plugins are enabled only in the game window.
 - The game window cannot leave its own origin: `will-navigate` and `new-window` are
   blocked and handed to the system browser, and `webview` tags are refused.
