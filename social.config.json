@@ -3,5 +3,8 @@
   "channelId": "1296158709529055253",
   "lobbySecret": "",
   "enableChannelLinking": false,
-  "executablePath": ""
+  "executablePath": "",
+  "jsBridge": true,
+  "clientSecret": "",
+  "pollIntervalMs": 2000
 }

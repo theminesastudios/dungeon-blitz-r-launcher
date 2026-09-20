@@ -29,7 +29,12 @@ app.setName(APP_DIRECTORY_NAME);
 app.setPath('userData', path.join(app.getPath('appData'), APP_DIRECTORY_NAME));
 
 const state = createStateStore(app.getPath('userData'));
-const social = new SocialBridge({ tokenCachePath: path.join(app.getPath('userData'), 'discord-social-token.json') });
+const social = new SocialBridge({
+    tokenCachePath: path.join(app.getPath('userData'), 'discord-social-token.json'),
+    // Authorization happens in the player's own Discord client; a browser is only opened
+    // when the configuration explicitly asks for that fallback.
+    openUrl: openExternal
+});
 const sessionCache = createSessionCache(path.join(app.getPath('userData'), 'launcher-session.json'));
 
 let launcherWindow = null;
@@ -58,12 +63,22 @@ function armFlash() {
     flashPlugin = locateFlash(state.read().flashPath);
     if (!flashPlugin) {
         flashArmed = false;
+        console.log('[Flash] No Flash plugin found; the launcher will ask for one.');
         return;
     }
 
     app.commandLine.appendSwitch('ppapi-flash-path', flashPlugin.path);
     app.commandLine.appendSwitch('ppapi-flash-version', flashPlugin.version);
     flashArmed = true;
+
+    // The same status the launcher window renders, on the console: the quickest way to
+    // tell a missing plugin from a copy built before the plugin was vendored.
+    console.log(`[Flash] Armed ${flashPlugin.source} plugin ${flashPlugin.version} at ${flashPlugin.path}`);
+    if (flashPlugin.archMismatch) {
+        console.log(
+            `[Flash] WARNING: the plugin is ${flashPlugin.architectures.join('/')} and this launcher runs as ${process.arch}; Flash cannot load.`
+        );
+    }
 }
 
 function resolveSelectedServer() {
@@ -80,7 +95,16 @@ function resolveSelectedServer() {
 
 function flashStatus() {
     if (!flashPlugin) {
-        return { found: false, armed: false, path: '', version: '', source: '', killSwitch: false };
+        return {
+            found: false,
+            armed: false,
+            path: '',
+            version: '',
+            source: '',
+            killSwitch: false,
+            architectures: [],
+            archMismatch: false
+        };
     }
 
     return {
@@ -89,7 +113,9 @@ function flashStatus() {
         path: flashPlugin.path,
         version: flashPlugin.version,
         source: flashPlugin.source,
-        killSwitch: flashPlugin.killSwitch
+        killSwitch: flashPlugin.killSwitch,
+        architectures: flashPlugin.architectures,
+        archMismatch: flashPlugin.archMismatch
     };
 }
 
@@ -119,8 +145,12 @@ function pushState() {
 
 // The Social SDK runs headless: it puts the player in the Discord lobby, and Discord's
 // own client is where lobby chat and the party roster are read. Nothing to render here.
+let lastLoggedSocialStatus = '';
 social.on('state', (snapshot) => {
-    if (snapshot.lastStatus) {
+    // Patches that carry no status (a lobby_ready's running flag, stop()) re-surface the
+    // previous status; logging only changes keeps the console one-line-per-event.
+    if (snapshot.lastStatus && snapshot.lastStatus !== lastLoggedSocialStatus) {
+        lastLoggedSocialStatus = snapshot.lastStatus;
         console.log(`[Social] ${snapshot.lastStatus}`);
     }
 });
@@ -302,6 +332,19 @@ async function play(serverId) {
             message: flashPlugin
                 ? 'The Flash path changed. Restart the launcher to pick it up.'
                 : 'The Flash plugin is missing. Run `npm run extract-flash` or choose it by hand.'
+        };
+    }
+
+    // Arming only sets command-line switches; the plugin is loaded in-process when the
+    // game page asks for it, and an architecture mismatch fails silently there. Refuse
+    // with the actual mismatch so the fix is obvious instead of a dead plugin box.
+    if (flashPlugin.archMismatch) {
+        return {
+            ok: false,
+            message:
+                `The Flash plugin is ${flashPlugin.architectures.join('/')} but this launcher runs as ` +
+                `${process.arch}, and a PPAPI plugin must match. Reinstall the dependencies as x64: ` +
+                '`npm_config_arch=x64 npm install`.'
         };
     }
 
@@ -540,7 +583,11 @@ if (!app.requestSingleInstanceLock()) {
         createLauncherWindow();
         void refreshServerStatus();
 
-        social.start();
+        // DUNGEON_BLITZ_SOCIAL=0 keeps the bridge offline -- for headless smoke tests
+        // that must not open a browser or reach Discord.
+        if (process.env.DUNGEON_BLITZ_SOCIAL !== '0') {
+            social.start();
+        }
 
         // A player who has signed in before is not asked again: play() redeems the saved
         // device token on the way, so the game page finds a sign-in waiting for it. If the

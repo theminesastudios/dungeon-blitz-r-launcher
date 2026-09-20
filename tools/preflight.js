@@ -15,6 +15,8 @@
 const fs = require('fs');
 const path = require('path');
 
+const { pluginArchitectures } = require('../lib/flash');
+
 const LAUNCHER_ROOT = path.resolve(__dirname, '..');
 const VENDOR_ROOT = path.join(LAUNCHER_ROOT, 'vendor', 'flash');
 
@@ -46,6 +48,24 @@ function describeVendor(platform) {
     return { directory, found };
 }
 
+// The packaged launcher is x64 on every platform, and a PPAPI plugin is loaded
+// in-process, so the vendored plugin has to match. Parse the binary headers and warn
+// loudly instead of shipping a package whose Flash can never start.
+function warnIfArchUnsupported(platform, directory, pluginName) {
+    const architectures = pluginArchitectures(path.join(directory, pluginName));
+    if (!architectures.length || architectures.includes('x64')) {
+        return;
+    }
+
+    console.warn('');
+    console.warn(
+        `[preflight] UYARI: ${pluginName} yalnizca ${architectures.join('/')} destekliyor, x64 yok.`
+    );
+    console.warn(`[preflight] ${platform} paketi x64; bu eklenti yuklenemez. x86_64 bir`);
+    console.warn('[preflight] eklenti uretip `npm run extract-flash` ile vendor/ altina kopyalayin.');
+    console.warn('');
+}
+
 function main() {
     const platform = parsePlatform(process.argv.slice(2));
     if (!EXPECTED[platform]) {
@@ -57,6 +77,7 @@ function main() {
 
     if (found.length) {
         console.log(`[preflight] ${platform}: Flash hazir -> ${found.join(', ')}`);
+        warnIfArchUnsupported(platform, directory, found[0]);
         return;
     }
 

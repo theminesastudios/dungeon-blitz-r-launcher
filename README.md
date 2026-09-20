@@ -98,6 +98,18 @@ npm run build:bridge
 On Linux this also needs `libasound2-dev` and `libpulse-dev` — the SDK links against ALSA
 and PulseAudio. Copy the result into `payload/social/<platform>/`.
 
+**No macOS build of the Social SDK exists.** On darwin (and wherever the native binary is
+absent) the launcher falls back to a built-in JavaScript driver — `lib/socialJs.js` over
+`lib/socialRest.js`, modelled on `@minesa-org/mini-interaction`'s `DiscordRestClient` —
+which speaks the same protocol events to Discord's HTTP lobby API: PKCE sign-in in the
+player's browser, create-or-join by lobby secret, linked-channel relay and message
+polling. It needs the application to allow the `openid identify sdk.social_layer` scopes
+and to register the loopback redirect `http://127.0.0.1/callback`.
+
+```bash
+node tools/test-social-bridge.js   # drives the JS bridge against a local mock of Discord
+```
+
 **`deviceFlow` must stay off.** The device path requires the Discord application to allow
 device authorization; without it the SDK does not return an error, it aborts the whole
 process on a failed `CanAuthorizeDevice` check. The browser PKCE flow needs no such
