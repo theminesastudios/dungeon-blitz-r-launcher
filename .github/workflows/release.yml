@@ -70,9 +70,10 @@ jobs:
             platform: win32
             label: Windows
             builder_args: --win
-          # macos-13 is the Intel runner: the last Flash plugin is x86_64, and a PPAPI
-          # plugin must match the host process architecture.
-          - os: macos-13
+          # An Intel runner, because the last Flash plugin is x86_64 and a PPAPI plugin
+          # must match the architecture of the process hosting it. macos-13 was retired,
+          # and a retired label does not fail -- the job simply queues forever.
+          - os: macos-15-intel
             platform: darwin
             label: macOS
             builder_args: --mac
