@@ -19,6 +19,15 @@ const {
 const GAME_WINDOW_DEFAULTS = { width: 1200, height: 800, minWidth: 800, minHeight: 600 };
 const BACKGROUND_COLOR = '#484955';
 
+// package.json carries the scoped name GitHub Packages requires, which Electron would
+// otherwise turn into a user data folder called "@theminesastudios/dungeon-blitz-r-launcher"
+// -- a slash inside a directory name, and every player's saved sign-in stranded in the old
+// one. setName alone does not undo it: the default path is resolved before the main script
+// runs, so the path is set outright.
+const APP_DIRECTORY_NAME = 'dungeon-blitz-r-launcher';
+app.setName(APP_DIRECTORY_NAME);
+app.setPath('userData', path.join(app.getPath('appData'), APP_DIRECTORY_NAME));
+
 const state = createStateStore(app.getPath('userData'));
 const social = new SocialBridge({ tokenCachePath: path.join(app.getPath('userData'), 'discord-social-token.json') });
 
