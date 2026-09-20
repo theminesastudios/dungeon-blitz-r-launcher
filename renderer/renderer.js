@@ -14,6 +14,7 @@ const elements = {
     forget: document.getElementById('forget'),
     versions: document.getElementById('versions'),
     updateInstall: document.getElementById('update-install'),
+    updateCheck: document.getElementById('update-check'),
     quit: document.getElementById('quit'),
     engineStatus: document.getElementById('engine-status')
 };
@@ -271,8 +272,10 @@ function render(state) {
     elements.moveApp.hidden = !(state.install && state.install.relocate && state.install.canMove);
 
     // The restart-to-update button appears only when a full update is sitting downloaded;
-    // every other state leaves the strip to say what is happening instead.
+    // every other state leaves the strip to say what is happening instead. The manual
+    // check button is pointless where the updater is off entirely.
     elements.updateInstall.hidden = !state.update || state.update.state !== 'downloaded';
+    elements.updateCheck.hidden = Boolean(state.update && state.update.state === 'disabled');
 
     renderEngineStatus(state);
     elements.versions.textContent = `v${state.appVersion}`;
@@ -310,6 +313,19 @@ elements.relaunch.addEventListener('click', () => {
 
 elements.updateInstall.addEventListener('click', () => {
     void window.launcher.updateInstall();
+});
+
+elements.updateCheck.addEventListener('click', async () => {
+    const button = elements.updateCheck;
+    button.disabled = true;
+    try {
+        const summary = await window.launcher.updateCheck();
+        if (summary) {
+            render({ ...currentState, update: summary });
+        }
+    } finally {
+        button.disabled = false;
+    }
 });
 
 elements.moveApp.addEventListener('click', async () => {
