@@ -1,6 +1,7 @@
 {
-  "name": "@theminesastudios/dungeon-blitz-r-launcher",
+  "name": "dungeon-blitz-r-launcher",
   "version": "1.0.0",
+  "private": true,
   "description": "Dungeon Blitz: R launcher with an embedded Adobe Flash (PPAPI) runtime",
   "homepage": "https://theminesa.studio",
   "repository": {
@@ -8,16 +9,6 @@
     "url": "git+https://github.com/theminesastudios/dungeon-blitz-r-launcher.git"
   },
   "main": "main.js",
-  "files": [
-    "main.js",
-    "preload.js",
-    "lib/",
-    "renderer/",
-    "tools/",
-    "native_bridge/",
-    "servers.json",
-    "social.config.json"
-  ],
   "scripts": {
     "start": "electron .",
     "extract-flash": "node tools/extract-flash.js",
@@ -29,9 +20,6 @@
     "predist:mac": "node tools/preflight.js --platform darwin",
     "predist:linux": "node tools/preflight.js --platform linux",
     "build:bridge": "cmake -S native_bridge -B native_bridge/build -DCMAKE_BUILD_TYPE=Release && cmake --build native_bridge/build --config Release"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
   },
   "devDependencies": {
     "electron": "^11.5.0",
@@ -65,15 +53,25 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
-      ],
-      "artifactName": "DungeonBlitzR-Launcher-${version}-win-${arch}.${ext}"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": false,
+      "artifactName": "DungeonBlitzR-Launcher-${version}-win-${arch}-setup.${ext}"
     },
     "mac": {
       "target": [
@@ -101,6 +99,9 @@
       "category": "Game",
       "maintainer": "The Minesa Studios <noreply@theminesa.studio>",
       "artifactName": "DungeonBlitzR-Launcher-${version}-linux-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "DungeonBlitzR-Launcher-${version}-win-${arch}-portable.${ext}"
     }
   }
 }
