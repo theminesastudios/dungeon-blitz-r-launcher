@@ -47,7 +47,7 @@ function render(state) {
     currentState = state;
 
     const flash = state.flash;
-    const playable = flash.armed && state.servers.length > 0;
+    const playable = flash.armed && !flash.archMismatch && state.servers.length > 0;
 
     elements.status.textContent = statusLine(state);
     elements.discordLogin.disabled = state.discord.loginPending || !state.serverReachable;
@@ -60,6 +60,13 @@ function render(state) {
 
     if (!flash.found) {
         showProblem('The Flash plugin is missing. Point the launcher at it to continue.', 'bad');
+    } else if (flash.archMismatch) {
+        showProblem(
+            `The Flash plugin is ${flash.architectures.join('/')} but this launcher runs as a ` +
+                'different architecture, so Flash cannot load. Reinstall dependencies as x64: ' +
+                'npm_config_arch=x64 npm install',
+            'bad'
+        );
     } else if (!flash.armed) {
         showProblem('The Flash path changed. Restart the launcher to pick it up.', 'warn');
     } else if (flash.killSwitch) {
