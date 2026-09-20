@@ -13,6 +13,7 @@ const elements = {
     accountName: document.getElementById('account-name'),
     forget: document.getElementById('forget'),
     versions: document.getElementById('versions'),
+    updateInstall: document.getElementById('update-install'),
     quit: document.getElementById('quit'),
     engineStatus: document.getElementById('engine-status')
 };
@@ -111,11 +112,32 @@ function engineRows(state) {
         chatDetail = 'Disabled with DUNGEON_BLITZ_CHAT_RELAY=0.';
     }
 
+    // The update row: quiet unless there is something a player can act on. A downloaded
+    // update is 'ok' (the restart button appears below), a check failure stays 'muted' --
+    // offline moments and unsigned-macOS limits are not launcher faults.
+    const update = state.update || {};
+    let updateValue = 'up to date';
+    let updateTone = 'muted';
+    let updateDetail = 'The launcher checks GitHub for a newer version after start and every six hours.';
+    if (update.state === 'disabled') {
+        updateValue = 'off in this build';
+        updateDetail = 'Updates are checked only in an installed launcher.';
+    } else if (update.state === 'downloading') {
+        updateValue = update.percent ? `downloading ${update.version} - ${update.percent}%` : `downloading ${update.version}`;
+        updateTone = 'warn';
+    } else if (update.state === 'downloaded') {
+        updateValue = `${update.version} ready - restart to install`;
+        updateTone = 'ok';
+    } else if (update.state === 'checking') {
+        updateValue = 'checking...';
+    }
+
     return [
         { label: 'Flash', value: flashValue, tone: flashTone, detail: flashDetail },
         { label: 'Discord status', value: presenceValue, tone: presenceTone, detail: presenceDetail },
         { label: 'Lobby chat', value: socialValue, tone: socialTone, detail: socialDetail },
-        { label: 'In-game chat', value: chatValue, tone: chatTone, detail: chatDetail }
+        { label: 'In-game chat', value: chatValue, tone: chatTone, detail: chatDetail },
+        { label: 'Update', value: updateValue, tone: updateTone, detail: updateDetail }
     ];
 }
 
@@ -248,6 +270,10 @@ function render(state) {
 
     elements.moveApp.hidden = !(state.install && state.install.relocate && state.install.canMove);
 
+    // The restart-to-update button appears only when a full update is sitting downloaded;
+    // every other state leaves the strip to say what is happening instead.
+    elements.updateInstall.hidden = !state.update || state.update.state !== 'downloaded';
+
     renderEngineStatus(state);
     elements.versions.textContent = `v${state.appVersion}`;
 }
@@ -280,6 +306,10 @@ elements.browseFlash.addEventListener('click', async () => {
 
 elements.relaunch.addEventListener('click', () => {
     void window.launcher.relaunch();
+});
+
+elements.updateInstall.addEventListener('click', () => {
+    void window.launcher.updateInstall();
 });
 
 elements.moveApp.addEventListener('click', async () => {

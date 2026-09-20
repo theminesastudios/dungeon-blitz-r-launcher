@@ -126,17 +126,23 @@ jobs:
         run: node tools/preflight.js --platform ${{ matrix.platform }}
 
       - name: Build installers
-        run: npx electron-builder ${{ matrix.builder_args }} --publish never
+        # --publish always uploads the installers AND the latest*.yml metadata the
+        # launcher's auto-updater reads; without those files an installed launcher can
+        # never see a new release. It still needs the release job below to publish the
+        # draft: GitHub's update provider cannot see a draft release.
+        run: npx electron-builder ${{ matrix.builder_args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Unsigned builds. Signing needs the studio's certificates: CSC_LINK /
           # CSC_KEY_PASSWORD for both Windows and macOS, plus APPLE_ID,
-          # APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID for notarization.
+          # APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID for notarization. Signing is
+          # also what makes macOS auto-update work: an unsigned macOS build cannot be
+          # self-updated, so those players update by downloading the new .dmg by hand.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: List what was built
         shell: bash
-        run: ls -la dist/*.exe dist/*.dmg dist/*.zip dist/*.AppImage dist/*.deb 2>/dev/null || true
+        run: ls -la dist/*.exe dist/*.dmg dist/*.zip dist/*.AppImage dist/*.deb dist/latest*.yml 2>/dev/null || true
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
@@ -149,6 +155,7 @@ jobs:
             dist/*.zip
             dist/*.AppImage
             dist/*.deb
+            dist/latest*.yml
 
   release:
     name: Publish release
@@ -170,6 +177,9 @@ jobs:
           name: Launcher v${{ needs.version.outputs.current }}
           generate_release_notes: true
           # Left as a draft so the unsigned builds get a look before players see them.
+          # electron-builder has already uploaded the artifacts and the latest*.yml update
+          # metadata to this draft; PUBLISHING the draft (one click, or the API) is what
+          # makes the auto-updater see it -- a draft release is invisible to the feed.
           draft: true
           files: installers/*
         env:

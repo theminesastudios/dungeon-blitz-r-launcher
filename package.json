@@ -12,8 +12,9 @@
   "scripts": {
     "start": "electron .",
     "extract-flash": "node tools/extract-flash.js",
-    "test": "node tools/test-presence.js && node tools/test-chat-relay.js && node tools/test-social-bridge.js && node tools/test-discord-ipc.js && node tools/test-launcher-status.js && node tools/test-install-location.js && node tools/test-package-files.js",
+    "test": "node tools/test-presence.js && node tools/test-chat-relay.js && node tools/test-social-bridge.js && node tools/test-discord-ipc.js && node tools/test-launcher-status.js && node tools/test-install-location.js && node tools/test-package-files.js && node tools/test-updater.js",
     "make-icons": "node tools/make-icons.js",
+    "test-updater": "node tools/test-updater.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
@@ -25,7 +26,8 @@
   },
   "devDependencies": {
     "electron": "^11.5.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "electron-updater": "4.3.9"
   },
   "author": "The Minesa Studios",
   "license": "MIT",
@@ -35,6 +37,13 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "theminesastudios",
+        "repo": "dungeon-blitz-r-launcher"
+      }
+    ],
     "files": [
       "main.js",
       "preload.js",

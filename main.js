@@ -10,6 +10,7 @@ const { exists, inspectInstallLocation, isWritableDirectory } = require('./lib/i
 const { findFlashPlugin, findVendoredPlugin } = require('./lib/flash');
 const { PresenceBridge } = require('./lib/presence');
 const { SocialBridge } = require('./lib/social');
+const { createUpdateService } = require('./lib/update');
 const { createSessionCache } = require('./lib/launcherSession');
 const {
     LAUNCHER_ROOT,
@@ -53,6 +54,11 @@ const social = new SocialBridge({
     openUrl: openExternal
 });
 const sessionCache = createSessionCache(path.join(app.getPath('userData'), 'launcher-session.json'));
+
+// Auto-update: GitHub releases are the feed (build.publish in package.json points
+// electron-updater at them). Dev checkouts and dev AppImages never self-update, and the
+// service itself is inert unless app.isPackaged.
+let updateService = null;
 
 // Rich presence is served by the launcher itself. The multiplayer server's own bridge
 // cannot be used from a packaged build, and its absence used to be silent: presence just
@@ -251,6 +257,9 @@ function launcherState() {
             targetPath: String(installLocation.targetPath || ''),
             canMove: Boolean(installLocation.targetPath)
         },
+        update: updateService
+            ? updateService.summary()
+            : { state: 'disabled', percent: 0, version: '', error: '', currentVersion: app.getVersion(), lastCheckedAt: 0 },
         discord: {
             ...discordAccount,
             remembered,
@@ -859,6 +868,14 @@ function registerIpc() {
 
     ipcMain.handle('launcher:moveToApplications', () => moveToApplications());
 
+    ipcMain.handle('launcher:updateCheck', () => {
+        if (updateService) {
+            updateService.checkNow();
+        }
+        return updateService ? updateService.summary() : null;
+    });
+    ipcMain.handle('launcher:updateInstall', () => (updateService ? updateService.restartToUpdate() : false));
+
     ipcMain.handle('launcher:play', () => play());
     ipcMain.handle('launcher:quit', () => app.quit());
 }
@@ -882,6 +899,22 @@ if (!app.requestSingleInstanceLock()) {
     installLocation = inspectInstallLocation({ isPackaged: app.isPackaged, appPath: app.getAppPath() });
     if (installLocation.relocate) {
         console.warn(`[Install] ${installLocation.message} (running from ${installLocation.bundlePath})`);
+    }
+    // The updater only arms in a packaged build: a checkout updates by git pull, and a dev
+    // AppImage is exactly the kind of install that must not write over itself.
+    if (app.isPackaged) {
+        const { autoUpdater } = require('electron-updater');
+        autoUpdater.autoDownload = true;
+        // The floor: if the player ignores the restart prompt, the update still lands on
+        // the next quit. The prompt itself is never a forced restart (game may be open).
+        autoUpdater.autoInstallOnAppQuit = true;
+        updateService = createUpdateService({
+            autoUpdater,
+            app,
+            log: (message) => console.log(message)
+        });
+        updateService.on('state', () => pushState());
+        updateService.start();
     }
     registerIpc();
 
@@ -928,5 +961,8 @@ if (!app.requestSingleInstanceLock()) {
         presence.stop();
         chatRelay.stop();
         social.stop();
+        if (updateService) {
+            updateService.stop();
+        }
     });
 }
