@@ -83,11 +83,38 @@ function tempDirectory() {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'discord-ipc-test-'));
 }
 
+/**
+ * Points socketPaths() at `directory`, and hands back the restore.
+ *
+ * Both of the variables it consults, in its order of preference: TMPDIR alone is enough on
+ * macOS and enough on nothing else, because any Linux with a systemd user session -- a CI
+ * runner included -- sets XDG_RUNTIME_DIR and that one wins. Left unset, the handshake test
+ * looked for its mock in the runner's real runtime directory and reported the very error the
+ * other half of this file asserts on; and the not-running test would have found a real
+ * Discord on a developer's Linux machine and failed for the opposite reason.
+ */
+function redirectSocketLookup(directory) {
+    const previous = { TMPDIR: process.env.TMPDIR, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR };
+    process.env.TMPDIR = `${directory}/`;
+    process.env.XDG_RUNTIME_DIR = directory;
+
+    return function restore() {
+        for (const [name, value] of Object.entries(previous)) {
+            // Assigning undefined would leave the string "undefined" behind, which the next
+            // lookup would resolve as a directory of that name.
+            if (value === undefined) {
+                delete process.env[name];
+            } else {
+                process.env[name] = value;
+            }
+        }
+    };
+}
+
 async function testHandshakeAndAuthorize() {
     const directory = tempDirectory();
-    const previous = process.env.TMPDIR;
-    // socketPaths() reads TMPDIR, so the mock looks like Discord's own socket.
-    process.env.TMPDIR = `${directory}/`;
+    // The mock has to sit where socketPaths() looks, so it passes for Discord's own socket.
+    const restoreSocketLookup = redirectSocketLookup(directory);
 
     const { server, seen } = await startMockDiscord(directory);
     const client = new DiscordIpcClient();
@@ -120,15 +147,17 @@ async function testHandshakeAndAuthorize() {
     } finally {
         client.close();
         server.close();
-        process.env.TMPDIR = previous;
+        restoreSocketLookup();
         fs.rmSync(directory, { recursive: true, force: true });
     }
 }
 
 async function testDiscordNotRunning() {
     const directory = tempDirectory();
-    const previous = process.env.TMPDIR;
-    process.env.TMPDIR = `${directory}/`;
+    // An empty directory, and the lookup pointed firmly at it: otherwise a developer running
+    // this on Linux with Discord open would connect to the real thing and never see the
+    // refusal this asserts.
+    const restoreSocketLookup = redirectSocketLookup(directory);
 
     const client = new DiscordIpcClient();
     try {
@@ -138,7 +167,7 @@ async function testDiscordNotRunning() {
         );
     } finally {
         client.close();
-        process.env.TMPDIR = previous;
+        restoreSocketLookup();
         fs.rmSync(directory, { recursive: true, force: true });
     }
 }
