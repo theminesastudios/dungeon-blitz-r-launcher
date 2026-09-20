@@ -63,6 +63,13 @@ stale or incompletely built install takes — see `DUNGEON_BLITZ_ALLOW_NO_FLASH=
 deliberately Flash-less build. Development checkouts are exempt: there, a missing plugin
 is one `npm run extract-flash` away, and the launcher window says so.
 
+The 1.0.3 macOS release shipped exactly that refusal dialog: `payload/flash/darwin/` was
+never committed, the macOS CI job packaged a Flash-less app, and the packaging preflight
+only printed a warning that nobody read. Preflight now **fails** the build when the
+target platform has no plugin in `vendor/` — a deliberate Flash-less package must say so
+with `DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1` — so the two ends of this can never
+diverge again: a package that would refuse to start cannot leave CI quietly.
+
 The sign-in screen carries a four-row status strip — `Flash`, `Discord status`, `Lobby
 chat` and `In-game chat` — showing the plugin that was armed (version and source, or
 `missing`), whether Discord has a presence for the player, and what each chat direction is
@@ -113,7 +120,8 @@ level groups (`home`, `indungeon`, `newbieroad`, `dungeon_blitz`) and the discip
 (`flameseer`, `frostbringer`, `justicar`, `mage`, `necromancer`, `paladin`, `rogue`,
 `sentinel`, `shadowbringer`, `soulthieft`, `templar`, `viperblade`). A key that matches
 nothing renders as *no* image on Discord, so an unknown key falls back to the configured
-`indungeon` art.
+`indungeon` art — and `DUNGEON_BLITZ_LOG_PRESENCE=1` prints every key the page sends, to
+spot names the asset list is missing.
 
 `presence.config.json` holds the application id, port, artwork keys and the origins allowed
 to push; a side-by-side game checkout's `discord-bridge.config.json` overrides it when
@@ -235,6 +243,10 @@ npm install && npm run extract-flash && npm start
 npm run dist:win
 ```
 
+Each `dist:` script first runs `tools/preflight.js` for its platform, which fails the
+build when that platform has no Flash plugin staged in `vendor/` (override for a
+deliberate Flash-less package: `DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1`).
+
 Output lands in `dist/`. What can be built where:
 
 | Target | On Windows | On Linux (incl. WSL) | On macOS |
@@ -259,8 +271,8 @@ npm run dist:win -- --dir --config.win.signAndEditExecutable=false
 
 Bumping `version` in `package.json` on `main` is what cuts a release.
 `.github/workflows/release.yml` then builds on three native runners, stages the binaries,
-checks that Flash is present, runs electron-builder and attaches the installers to a draft
-GitHub release tagged `v<version>`:
+runs the preflight (a missing Flash plugin fails the job), runs electron-builder and
+attaches the installers to a draft GitHub release tagged `v<version>`:
 
 | Platform | Files |
 | --- | --- |
