@@ -117,6 +117,7 @@ function baseState(flash, social, extra = {}) {
             lastError: ''
         },
         chat: extra.chat || { enabled: true, running: false, supported: null, relayed: 0, received: 0, lastError: '' },
+        update: extra.update || { state: 'not-available', percent: 0, version: '', error: '', currentVersion: '1.0.0' },
         install: extra.install || { relocate: false, reason: '', message: '', sourcePath: '', targetPath: '', canMove: false },
         discord: extra.discord || { linked: false, email: '', name: '', remembered: false, loginPending: false }
     };
@@ -181,7 +182,8 @@ function main() {
             ['Flash', '32.0.0.303 - vendor', 'ok'],
             ['Discord status', 'Home - Idling in town', 'ok'],
             ['Lobby chat', 'connected', 'ok'],
-            ['In-game chat', '3 sent - 1 received', 'ok']
+            ['In-game chat', '3 sent - 1 received', 'ok'],
+            ['Update', 'up to date', 'muted']
         ]
     );
     assert.ok(row(rows, 'Flash').detail.includes('PepperFlashPlayer.plugin'), 'the Flash path is the tooltip');
@@ -266,6 +268,24 @@ function main() {
     rows = rowsFrom(registry);
     assert.strictEqual(row(rows, 'Lobby chat').value, 'Discord client not running');
     assert.strictEqual(row(rows, 'Lobby chat').tone, 'bad');
+
+    // The Update row: quiet when up to date, loud when an install is waiting.
+    render(baseState(ARMED_FLASH, IDLE_SOCIAL, { update: { state: 'downloading', percent: 42, version: '1.1.0', error: '', currentVersion: '1.0.4' } }));
+    rows = rowsFrom(registry);
+    assert.strictEqual(row(rows, 'Update').value, 'downloading 1.1.0 - 42%');
+    assert.strictEqual(row(rows, 'Update').tone, 'warn');
+    assert.strictEqual(registry.get('update-install').hidden, true, 'no restart button mid-download');
+
+    render(baseState(ARMED_FLASH, IDLE_SOCIAL, { update: { state: 'downloaded', percent: 100, version: '1.1.0', error: '', currentVersion: '1.0.4' } }));
+    rows = rowsFrom(registry);
+    assert.strictEqual(row(rows, 'Update').value, '1.1.0 ready - restart to install');
+    assert.strictEqual(row(rows, 'Update').tone, 'ok');
+    assert.strictEqual(registry.get('update-install').hidden, false, 'the restart button appears when the update is complete');
+
+    render(baseState(ARMED_FLASH, IDLE_SOCIAL, { update: { state: 'disabled', percent: 0, version: '', error: '', currentVersion: '1.0.4' } }));
+    rows = rowsFrom(registry);
+    assert.strictEqual(row(rows, 'Update').value, 'off in this build');
+    assert.strictEqual(registry.get('update-install').hidden, true);
 
     // A remembered account replaces the sign-in button entirely.
     render(

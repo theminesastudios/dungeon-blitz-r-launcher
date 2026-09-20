@@ -296,6 +296,23 @@ publishes when `publish` is ticked.
 Packages are **unsigned**. Signing needs `CSC_LINK` and `CSC_KEY_PASSWORD` for Windows and
 macOS, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization.
 
+## Auto-update
+
+An installed launcher updates itself. `lib/update.js` wraps electron-updater with GitHub
+releases as the feed (`build.publish` in package.json): it checks a few seconds after
+start and then every six hours, downloads a new version in the background and shows an
+`Update` row in the status strip -- `downloading 1.1.0 - 42%`, then `1.1.0 ready -
+restart to install` with a **Restart to update** button. Nothing forces the restart while
+the game might be open; if the player ignores the prompt, the update still installs on
+the next quit (`autoInstallOnAppQuit`). Dev checkouts and dev AppImages never self-update.
+
+Two feed rules are easy to trip over: the release job uploads the `latest*.yml` metadata
+alongside the installers (`--publish always`), and the draft release must be **published**
+before any installed launcher sees it -- GitHub's update provider cannot read a draft.
+And on macOS an update can only replace a signed app: these unsigned builds show the
+check as an error there, so macOS players update by downloading the new .dmg. `npm run
+test-updater` pins the state machine against a fake updater, no Electron or network.
+
 ## Servers
 
 Targets live in `servers.json`. There is no server picker in the UI; the launcher uses the
