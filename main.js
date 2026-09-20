@@ -23,6 +23,20 @@ const {
 const GAME_WINDOW_DEFAULTS = { width: 1200, height: 800, minWidth: 800, minHeight: 600 };
 const BACKGROUND_COLOR = '#484955';
 
+// One 256px PNG arms the window icon on every platform and the dock icon on Linux and
+// Windows; the packaged macOS app takes its icon from build/icon.icns via electron-builder,
+// and the dock line below covers running from a checkout. A missing file is not fatal -- a
+// window without an icon still works -- so this resolves lazily rather than failing start.
+const WINDOW_ICON_PATH = path.join(LAUNCHER_ROOT, 'renderer', 'assets', 'icon.png');
+const windowIcon = fs.existsSync(WINDOW_ICON_PATH) ? WINDOW_ICON_PATH : undefined;
+
+function applyDockIcon() {
+    if (process.platform === 'darwin' && app.dock && windowIcon) {
+        // The dock is macOS-only, so the image is always readable here.
+        app.dock.setIcon(windowIcon);
+    }
+}
+
 // Electron derives the user data folder from package.json's name, so renaming the package
 // would strand every player's saved sign-in in the old folder. Pinning it outright keeps
 // that folder fixed whatever the package is called. setName alone is not enough: the
@@ -285,6 +299,7 @@ function createLauncherWindow() {
         backgroundColor: '#1d1e26',
         title: 'Dungeon Blitz: R',
         show: false,
+        icon: windowIcon,
         webPreferences: {
             preload: path.join(LAUNCHER_ROOT, 'preload.js'),
             contextIsolation: true,
@@ -363,6 +378,7 @@ function createGameWindow(url) {
         backgroundColor: BACKGROUND_COLOR,
         title: 'Dungeon Blitz',
         show: false,
+        icon: windowIcon,
         webPreferences: {
             plugins: true,
             contextIsolation: true,
@@ -876,6 +892,7 @@ if (!app.requestSingleInstanceLock()) {
         }
 
         createLauncherWindow();
+        applyDockIcon();
         void refreshServerStatus();
         void warnAboutInstallLocation();
         // Covers a session that outlived the launcher: the account is there to be found
@@ -893,6 +910,7 @@ if (!app.requestSingleInstanceLock()) {
         app.on('activate', () => {
             if (!BrowserWindow.getAllWindows().length) {
                 createLauncherWindow();
+                applyDockIcon();
             }
         });
     });
