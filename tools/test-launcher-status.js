@@ -254,6 +254,19 @@ function main() {
     render(baseState(ARMED_FLASH, { ...IDLE_SOCIAL, running: true, lastStatus: 'JavaScript social bridge starting...' }));
     assert.strictEqual(row(rowsFrom(registry), 'Lobby chat').value, 'connecting...');
 
+    // The Discord client being closed is the common "never connects" cause; the row must
+    // name it instead of leaving an errno to decode.
+    render(
+        baseState(ARMED_FLASH, {
+            ...IDLE_SOCIAL,
+            running: true,
+            lastStatus: 'The Discord desktop client is not running. Start Discord, then start the game again.'
+        })
+    );
+    rows = rowsFrom(registry);
+    assert.strictEqual(row(rows, 'Lobby chat').value, 'Discord client not running');
+    assert.strictEqual(row(rows, 'Lobby chat').tone, 'bad');
+
     // A remembered account replaces the sign-in button entirely.
     render(
         baseState(ARMED_FLASH, IDLE_SOCIAL, {

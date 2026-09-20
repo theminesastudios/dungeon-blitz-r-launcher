@@ -105,6 +105,16 @@ packaged Electron carries is v12 (Electron 11), which cannot load that bridge's
 dependencies (express 5 needs Node 18 and `node:`-prefixed builtins). It used to be spawned
 with its output discarded, so it died silently and presence never appeared.
 
+Area artwork comes from `LEVEL_AREA_IMAGE_KEYS` in `lib/presence.js`: the key the game page
+pushes (`areaKey`, else `levelKey`) is matched against the Rich Presence assets uploaded to
+the Discord application — every region (`blackrosemire`, `castlehocke`, `cemeteryhill`,
+`emeraldglades`, `fellbridge`, `shazaridesert`, `stormshardmountain`, `valhaven`, …), the
+level groups (`home`, `indungeon`, `newbieroad`, `dungeon_blitz`) and the disciplines
+(`flameseer`, `frostbringer`, `justicar`, `mage`, `necromancer`, `paladin`, `rogue`,
+`sentinel`, `shadowbringer`, `soulthieft`, `templar`, `viperblade`). A key that matches
+nothing renders as *no* image on Discord, so an unknown key falls back to the configured
+`indungeon` art.
+
 `presence.config.json` holds the application id, port, artwork keys and the origins allowed
 to push; a side-by-side game checkout's `discord-bridge.config.json` overrides it when
 present, so an existing bridge setup keeps working. Discord does not have to be running to
@@ -274,6 +284,13 @@ saved choice from `launcher-state.json` in the user data folder, or `defaultServ
 
 ```bash
 npm test
+```
+
+Two environment switches help debug a live install without editing it:
+
+```bash
+DUNGEON_BLITZ_LOG_PRESENCE=1   # every presence push: payload, area key, dedupe decisions
+DUNGEON_BLITZ_LOG_NETWORK=1    # every Discord API call the lobby bridge makes, with results
 ```
 
 Every suite runs without Electron, Discord, a game server or a plugin binary: each drives
