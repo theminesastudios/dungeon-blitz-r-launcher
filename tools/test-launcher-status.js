@@ -3,9 +3,9 @@
 
 /**
  * Checks what the launcher window actually renders -- the status rows (Flash, Discord rich
- * presence, lobby chat, the in-game chat mirror) and the account row -- for every
- * combination of state, without needing Electron: renderer.js runs against a minimal DOM
- * stub and the results are read back.
+ * presence, lobby chat, the in-game chat mirror, the widget profile) and the account row --
+ * for every combination of state, without needing Electron: renderer.js runs against a
+ * minimal DOM stub and the results are read back.
  *
  * Usage: node tools/test-launcher-status.js
  */
@@ -74,6 +74,7 @@ function loadRenderer() {
             browseFlash: async () => null,
             moveToApplications: async () => ({ ok: true }),
             relaunch: () => {},
+            gameStatsSync: async () => null,
             quit: () => {}
         }
     };
@@ -117,6 +118,15 @@ function baseState(flash, social, extra = {}) {
             lastError: ''
         },
         chat: extra.chat || { enabled: true, running: false, supported: null, relayed: 0, received: 0, lastError: '' },
+        gameStats: extra.gameStats || {
+            enabled: true,
+            running: false,
+            state: 'idle',
+            written: false,
+            username: '',
+            updatedAt: 0,
+            lastError: ''
+        },
         update: extra.update || { state: 'not-available', percent: 0, version: '', error: '', currentVersion: '1.0.0' },
         install: extra.install || { relocate: false, reason: '', message: '', sourcePath: '', targetPath: '', canMove: false },
         discord: extra.discord || { linked: false, email: '', name: '', remembered: false, loginPending: false }
@@ -183,6 +193,7 @@ function main() {
             ['Discord status', 'Home - Idling in town', 'ok'],
             ['Lobby chat', 'connected', 'ok'],
             ['In-game chat', '3 sent - 1 received', 'ok'],
+            ['Game stats', 'starts with the game', 'muted'],
             ['Update', 'up to date', 'muted']
         ]
     );
@@ -234,6 +245,71 @@ function main() {
     assert.strictEqual(row(rows, 'In-game chat').value, 'server has no chat feed');
     assert.strictEqual(row(rows, 'In-game chat').tone, 'warn');
     assert.strictEqual(row(rows, 'In-game chat').detail, 'This server does not mirror game chat to Discord yet.');
+
+    // The widget row: a written profile is the one state that means the widget has data to
+    // show -- which is exactly what a player sees, or does not see, on their own profile and
+    // on a friend's.
+    render(
+        baseState(ARMED_FLASH, IDLE_SOCIAL, {
+            gameStats: {
+                enabled: true,
+                running: true,
+                state: 'written',
+                written: true,
+                username: 'BridgeProbe',
+                updatedAt: 1700000000000,
+                lastError: ''
+            }
+        })
+    );
+    rows = rowsFrom(registry);
+    assert.strictEqual(row(rows, 'Game stats').value, 'profile written');
+    assert.strictEqual(row(rows, 'Game stats').tone, 'ok');
+    assert.ok(row(rows, 'Game stats').detail.includes('BridgeProbe'), 'the account written for is the tooltip');
+    assert.strictEqual(registry.get('game-stats-sync').hidden, false, 'the manual sync is offered during a session');
+
+    // No linked Discord account: the widget has nobody to be written for, and that is a
+    // different fix from a server fault.
+    render(
+        baseState(ARMED_FLASH, IDLE_SOCIAL, {
+            gameStats: {
+                enabled: true,
+                running: true,
+                state: 'unlinked',
+                written: false,
+                username: '',
+                updatedAt: 0,
+                lastError: 'Sign in with Discord in the game so the widget has an account to write.'
+            }
+        })
+    );
+    rows = rowsFrom(registry);
+    assert.strictEqual(row(rows, 'Game stats').value, 'no Discord account linked');
+    assert.strictEqual(row(rows, 'Game stats').tone, 'warn');
+    assert.ok(row(rows, 'Game stats').detail.includes('Sign in with Discord'));
+
+    // A server that has not been redeployed with the route: said plainly, so an empty widget
+    // is not mistaken for a broken account.
+    render(
+        baseState(ARMED_FLASH, IDLE_SOCIAL, {
+            gameStats: {
+                enabled: true,
+                running: true,
+                state: 'unsupported',
+                written: false,
+                username: '',
+                updatedAt: 0,
+                lastError: 'This server cannot write Discord widget stats yet.'
+            }
+        })
+    );
+    rows = rowsFrom(registry);
+    assert.strictEqual(row(rows, 'Game stats').value, 'server cannot write it');
+    assert.strictEqual(row(rows, 'Game stats').tone, 'warn');
+
+    // On the sign-in screen there is no session to ask, so there is no button to press.
+    render(baseState(ARMED_FLASH, IDLE_SOCIAL));
+    assert.strictEqual(registry.get('game-stats-sync').hidden, true, 'no sync button without a session');
 
     // Chat mirroring turned off by configuration.
     render(baseState(ARMED_FLASH, IDLE_SOCIAL, { chat: { enabled: false, running: false, supported: null, relayed: 0, received: 0, lastError: '' } }));

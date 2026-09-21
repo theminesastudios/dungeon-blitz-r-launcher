@@ -5,6 +5,7 @@ const path = require('path');
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 
 const { ChatRelay } = require('./lib/chatRelay');
+const { GameStats } = require('./lib/gameStats');
 const discordAuth = require('./lib/discordAuth');
 const { exists, inspectInstallLocation, isWritableDirectory } = require('./lib/install');
 const { findFlashPlugin, findVendoredPlugin } = require('./lib/flash');
@@ -69,6 +70,11 @@ const presence = new PresenceBridge({ launcherConfig: loadLauncherConfig() });
 // The game server does the reading and the printing; this side only carries the lines.
 const chatRelay = new ChatRelay({ social });
 chatRelay.on('state', () => pushState());
+
+// The Discord Game Stats widget is written by the game server, which is the only side that
+// can hold a bot token; the launcher asks for the write and shows what came back.
+const gameStats = new GameStats();
+gameStats.on('state', () => pushState());
 
 let launcherWindow = null;
 let gameWindow = null;
@@ -223,6 +229,20 @@ function flashStatus() {
     };
 }
 
+/** What the widget-stats pipeline is doing, for the window's status strip. */
+function gameStatsSummary() {
+    const snapshot = gameStats.snapshot();
+    return {
+        enabled: process.env.DUNGEON_BLITZ_GAME_STATS !== '0',
+        running: Boolean(snapshot.running),
+        state: String(snapshot.state || 'idle'),
+        written: Boolean(snapshot.written),
+        username: String(snapshot.username || ''),
+        updatedAt: Number(snapshot.updatedAt) || 0,
+        lastError: String(snapshot.lastError || '')
+    };
+}
+
 /** What the chat mirror is doing, for the window's status strip. */
 function chatSummary() {
     const snapshot = chatRelay.snapshot();
@@ -249,6 +269,7 @@ function launcherState() {
         presence: presenceSummary(),
         social: socialSummary(),
         chat: chatSummary(),
+        gameStats: gameStatsSummary(),
         install: {
             relocate: Boolean(installLocation.relocate),
             reason: String(installLocation.reason || ''),
@@ -450,6 +471,7 @@ function createGameWindow(url) {
         // both; keeping them up would leave the player shown as playing nothing.
         presence.stop();
         chatRelay.stop();
+        gameStats.stop();
         stopAccountPolling();
         if (launcherWindow && !launcherWindow.isDestroyed()) {
             launcherWindow.show();
@@ -536,6 +558,18 @@ async function play(serverId) {
             // Read at the moment of asking: the resume above rotates the token.
             getLauncherToken: () => sessionCache.read().token || ''
         });
+    }
+
+    // The widget profile is written for the player by the server, and a play session is when
+    // the ask belongs: the launcher token that identifies them was just resumed above, and
+    // the server reads the player's Discord account off it. One ask per session keeps the
+    // profile current without the player having to do anything.
+    if (process.env.DUNGEON_BLITZ_GAME_STATS !== '0') {
+        gameStats.start({
+            serverUrl: selected.url,
+            getLauncherToken: () => sessionCache.read().token || ''
+        });
+        void gameStats.sync();
     }
 
     createGameWindow(selected.url);
@@ -880,6 +914,13 @@ function registerIpc() {
     });
     ipcMain.handle('launcher:updateInstall', () => (updateService ? updateService.restartToUpdate() : false));
 
+    // The manual retry, for the player who just linked their Discord account and wants the
+    // widget filled without opening the game again.
+    ipcMain.handle('launcher:gameStatsSync', async () => {
+        await gameStats.sync();
+        return gameStatsSummary();
+    });
+
     ipcMain.handle('launcher:play', () => play());
     ipcMain.handle('launcher:quit', () => app.quit());
 }
@@ -964,6 +1005,7 @@ if (!app.requestSingleInstanceLock()) {
     app.on('before-quit', () => {
         presence.stop();
         chatRelay.stop();
+        gameStats.stop();
         social.stop();
         if (updateService) {
             updateService.stop();

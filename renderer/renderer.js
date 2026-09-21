@@ -15,6 +15,7 @@ const elements = {
     versions: document.getElementById('versions'),
     updateInstall: document.getElementById('update-install'),
     updateCheck: document.getElementById('update-check'),
+    gameStatsSync: document.getElementById('game-stats-sync'),
     quit: document.getElementById('quit'),
     engineStatus: document.getElementById('engine-status')
 };
@@ -30,6 +31,7 @@ function engineRows(state) {
     const social = state.social || {};
     const presence = state.presence || {};
     const chat = state.chat || {};
+    const widget = state.gameStats || {};
 
     let flashValue = 'missing';
     let flashTone = 'bad';
@@ -133,11 +135,47 @@ function engineRows(state) {
         updateValue = 'checking...';
     }
 
+    // The Discord widget is filled by the game server, which holds the bot token; the
+    // launcher only asks. So this row is where "the widget is empty" stops being a guess:
+    // it says whether a profile was written, and when it was not, which half is missing.
+    let widgetValue = 'starts with the game';
+    let widgetTone = 'muted';
+    let widgetDetail = 'The server writes your Discord widget profile when you play.';
+    if (widget.enabled === false) {
+        widgetValue = 'off';
+        widgetDetail = 'Disabled with DUNGEON_BLITZ_GAME_STATS=0.';
+    } else if (widget.state === 'syncing') {
+        widgetValue = 'writing...';
+    } else if (widget.state === 'written') {
+        const writtenAt = widget.updatedAt ? new Date(widget.updatedAt).toLocaleTimeString() : '';
+        widgetValue = 'profile written';
+        widgetTone = 'ok';
+        widgetDetail = [
+            `Discord has a widget profile${widget.username ? ` for ${widget.username}` : ''}.`,
+            writtenAt ? `Last written at ${writtenAt}.` : ''
+        ]
+            .filter(Boolean)
+            .join(' ');
+    } else if (widget.state === 'unlinked') {
+        widgetValue = 'no Discord account linked';
+        widgetTone = 'warn';
+        widgetDetail = widget.lastError;
+    } else if (widget.state === 'unsupported') {
+        widgetValue = 'server cannot write it';
+        widgetTone = 'warn';
+        widgetDetail = widget.lastError;
+    } else if (widget.state === 'error') {
+        widgetValue = 'failed';
+        widgetTone = 'warn';
+        widgetDetail = widget.lastError;
+    }
+
     return [
         { label: 'Flash', value: flashValue, tone: flashTone, detail: flashDetail },
         { label: 'Discord status', value: presenceValue, tone: presenceTone, detail: presenceDetail },
         { label: 'Lobby chat', value: socialValue, tone: socialTone, detail: socialDetail },
         { label: 'In-game chat', value: chatValue, tone: chatTone, detail: chatDetail },
+        { label: 'Game stats', value: widgetValue, tone: widgetTone, detail: widgetDetail },
         { label: 'Update', value: updateValue, tone: updateTone, detail: updateDetail }
     ];
 }
@@ -276,6 +314,9 @@ function render(state) {
     // check button is pointless where the updater is off entirely.
     elements.updateInstall.hidden = !state.update || state.update.state !== 'downloaded';
     elements.updateCheck.hidden = Boolean(state.update && state.update.state === 'disabled');
+    // Syncing only means something once a session has given the launcher a server to ask, so
+    // the button stays off the sign-in screen where there is nothing to write yet.
+    elements.gameStatsSync.hidden = !state.gameStats || !state.gameStats.running || state.gameStats.enabled === false;
 
     renderEngineStatus(state);
     elements.versions.textContent = `v${state.appVersion}`;
@@ -322,6 +363,19 @@ elements.updateCheck.addEventListener('click', async () => {
         const summary = await window.launcher.updateCheck();
         if (summary) {
             render({ ...currentState, update: summary });
+        }
+    } finally {
+        button.disabled = false;
+    }
+});
+
+elements.gameStatsSync.addEventListener('click', async () => {
+    const button = elements.gameStatsSync;
+    button.disabled = true;
+    try {
+        const summary = await window.launcher.gameStatsSync();
+        if (summary) {
+            render({ ...currentState, gameStats: summary });
         }
     } finally {
         button.disabled = false;

@@ -156,6 +156,52 @@ than polling forever. Disable it with `DUNGEON_BLITZ_CHAT_RELAY=0`.
 node tools/test-chat-relay.js   # relay, dedupe, queueing and unsupported servers, against a local mock
 ```
 
+## Discord widgets
+
+A player's Game Stats widget is rendered from an *Application Identity Profile*, and the
+only writer for one is `PATCH /applications/{app}/users/{user}/identities/{player}/profile`
+with the application's **bot token**. A bot token inside a desktop app is a token anyone can
+read out of the bundle, so the write stays on the game server and the launcher only asks for
+it:
+
+```text
+POST /api/discord/stats/sync   { token }   -> { ok, written, username, updatedAt, fields }
+```
+
+Discord creates the profile record on the **first** write, so a widget that has never been
+written is empty for everyone who looks at it -- the player and their friends alike. The
+launcher asks once per game session, identified by the launcher token it resumed at launch,
+and the `Game stats` row reports what came back: `profile written`; `no Discord account
+linked` (the server answered `discord-not-linked`, or an HTTP 409); `server cannot write it`
+(a 404 -- no such route yet); or `failed` with the server's own words. `Sync game stats`
+next to `Check for updates` retries by hand, which is what a player does right after linking
+inside the game. Disable all of it with `DUNGEON_BLITZ_GAME_STATS=0`.
+
+Writing also needs the player's link to grant `application_identities.write`. The consent
+dialog normally asks for it as part of the Social SDK scopes; if a write comes back
+unauthorized, add it to `scopes` in `social.config.json` (an empty list keeps the default
+`openid identify sdk.social_layer`). **The application must allow the scope in the
+Developer Portal first** -- otherwise Discord rejects the whole authorize with
+`invalid_scope`, which would take lobby chat down with it.
+
+```bash
+node tools/test-game-stats.js   # written, unlinked, unauthorized and unsupported servers
+```
+
+The portal half is not code, and it is where an invisible widget usually stops:
+
+1. The game must be **claimed**; Game Stats Widgets are not offered otherwise.
+2. Widget Top, Widget Bottom and Add Widget Preview each need a layout, and **Publish**
+   unlocks only once all three have their required fields -- an unpublished widget is
+   visible to developer-team members alone.
+3. Testing a draft needs **Developer Mode** on, then Add Widget > Game Widgets > Add to
+   profile, and a client refresh (`Cmd+R`): widget configs are cached per client session.
+4. Every asset a field references must be **Public** on the Assets page. A non-public asset
+   renders as a skeleton placeholder, which is what an empty widget looks like.
+
+Until the server route exists the row reads `server cannot write it`, so a portal-side
+problem and a data-side problem can be told apart without guessing.
+
 ## Remembered account
 
 The launcher's own sign-in writes the account to `launcher-state.json`. A player who signed

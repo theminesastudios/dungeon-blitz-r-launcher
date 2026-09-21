@@ -8,5 +8,6 @@
   "clientSecret": "",
   "discordIpc": true,
   "browserFallback": false,
+  "scopes": [],
   "pollIntervalMs": 2000
 }
