@@ -1,6 +1,6 @@
 {
   "name": "dungeon-blitz-r-launcher",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "description": "Dungeon Blitz: R launcher with an embedded Adobe Flash (PPAPI) runtime",
   "homepage": "https://theminesa.studio",
@@ -12,7 +12,7 @@
   "scripts": {
     "start": "electron .",
     "extract-flash": "node tools/extract-flash.js",
-    "test": "node tools/test-presence.js && node tools/test-chat-relay.js && node tools/test-social-bridge.js && node tools/test-discord-ipc.js && node tools/test-launcher-status.js && node tools/test-install-location.js && node tools/test-package-files.js && node tools/test-updater.js",
+    "test": "node tools/test-presence.js && node tools/test-chat-relay.js && node tools/test-linked-lobby.js && node tools/test-social-bridge.js && node tools/test-discord-ipc.js && node tools/test-launcher-status.js && node tools/test-install-location.js && node tools/test-package-files.js && node tools/test-updater.js",
     "make-icons": "node tools/make-icons.js",
     "test-updater": "node tools/test-updater.js",
     "dist": "electron-builder",

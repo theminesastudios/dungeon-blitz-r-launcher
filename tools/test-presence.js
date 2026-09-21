@@ -133,10 +133,17 @@ const PRESENCE_PAYLOAD = {
 
 async function main() {
     // socketPaths() reads the temporary directory from the environment, so a private one
-    // keeps the test away from a real Discord client that happens to be running.
+    // keeps the test away from a real Discord client that happens to be running. Windows
+    // has no unix sockets and no such directory -- it listens on named pipes, so the
+    // mock takes the pipe form under the same test-only name the env override gives
+    // socketPaths(), out of the way of a real client holding discord-ipc-0.
+    const isWindows = process.platform === 'win32';
     const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dbr-ipc-'));
     process.env.XDG_RUNTIME_DIR = runtimeDir;
-    const discord = await startMockDiscord(path.join(runtimeDir, 'discord-ipc-0'));
+    process.env.DUNGEON_BLITZ_DISCORD_SOCKET_NAME = 'dblr-test-';
+    const discord = await startMockDiscord(
+        isWindows ? '\\\\.\\pipe\\dblr-test-discord-ipc-0' : path.join(runtimeDir, 'dblr-test-discord-ipc-0')
+    );
 
     const { PresenceBridge } = require('../lib/presence');
     const bridge = new PresenceBridge({

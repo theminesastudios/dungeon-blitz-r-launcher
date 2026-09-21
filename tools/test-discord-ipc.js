@@ -75,7 +75,13 @@ function startMockDiscord(directory) {
     });
 
     return new Promise((resolve) => {
-        server.listen(path.join(directory, 'discord-ipc-0'), () => resolve({ server, seen }));
+        // Windows has no unix sockets: the mock takes the named-pipe form, under the
+        // same test-only name redirectSocketLookup() gave socketPaths().
+        const endpoint =
+            process.platform === 'win32'
+                ? '\\\\.\\pipe\\dblr-test-discord-ipc-0'
+                : path.join(directory, 'dblr-test-discord-ipc-0');
+        server.listen(endpoint, () => resolve({ server, seen }));
     });
 }
 
@@ -94,9 +100,16 @@ function tempDirectory() {
  * Discord on a developer's Linux machine and failed for the opposite reason.
  */
 function redirectSocketLookup(directory) {
-    const previous = { TMPDIR: process.env.TMPDIR, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR };
+    const previous = {
+        TMPDIR: process.env.TMPDIR,
+        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+        DUNGEON_BLITZ_DISCORD_SOCKET_NAME: process.env.DUNGEON_BLITZ_DISCORD_SOCKET_NAME
+    };
     process.env.TMPDIR = `${directory}/`;
     process.env.XDG_RUNTIME_DIR = directory;
+    // A name of our own, so a real Discord running on this machine -- which holds
+    // discord-ipc-0 outright on Windows -- and the mock never fight over a pipe.
+    process.env.DUNGEON_BLITZ_DISCORD_SOCKET_NAME = 'dblr-test-';
 
     return function restore() {
         for (const [name, value] of Object.entries(previous)) {

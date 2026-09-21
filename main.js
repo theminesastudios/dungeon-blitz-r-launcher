@@ -531,7 +531,11 @@ async function play(serverId) {
     // session is exactly what it always was. Repeated plays are no-ops -- the bridge
     // returns early while it is already running.
     if (settings.startSocialBridge && process.env.DUNGEON_BLITZ_SOCIAL !== '0') {
-        social.start();
+        social.start({
+            serverUrl: selected.url,
+            // Read at the moment of asking: the resume above rotates the token.
+            getLauncherToken: () => sessionCache.read().token || ''
+        });
     }
 
     createGameWindow(selected.url);
