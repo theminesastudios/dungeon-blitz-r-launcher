@@ -1,6 +1,6 @@
 {
   "name": "dungeon-blitz-r-launcher",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "private": true,
   "description": "Dungeon Blitz: R launcher with an embedded Adobe Flash (PPAPI) runtime",
   "homepage": "https://theminesa.studio",
