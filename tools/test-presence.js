@@ -287,13 +287,16 @@ async function main() {
     const partyActivity = discord.state.activities[15].activity;
     assert.strictEqual(partyActivity.details, 'In Party');
     assert.ok(!('state' in partyActivity), 'one empty line is left off on its own');
+    // Back to "not in a game", so the counts below start from the same place as before.
+    await post(port, '/clear', { clear: true }, GAME_ORIGIN);
+    assert.strictEqual(discord.state.activities.length, 17);
 
     // Any other game page gets nothing: a browser tab on some other site cannot write to
     // the player's Discord profile through this endpoint.
     const refused = await post(port, '/presence', PRESENCE_PAYLOAD, 'http://evil.example.test');
     assert.strictEqual(refused.status, 403);
     assert.strictEqual(refused.body.reason, 'origin-not-allowed');
-    assert.strictEqual(discord.state.activities.length, 16, 'a refused origin never reaches Discord');
+    assert.strictEqual(discord.state.activities.length, 17, 'a refused origin never reaches Discord');
 
     // /configure is what the page uses to learn where to send a party join.
     const configured = await post(port, '/configure', { characterName: 'BridgeProbe' }, GAME_ORIGIN);
@@ -313,7 +316,7 @@ async function main() {
     // would keep the player shown as playing a game they closed.
     bridge.stop();
     await sleep(300);
-    assert.strictEqual(discord.state.activities.length, 14, 'nothing was left to clear on stop()');
+    assert.strictEqual(discord.state.activities.length, 17, 'nothing was left to clear on stop()');
     assert.strictEqual(bridge.snapshot().running, false);
 
     // A game that was running when the window closed is cleared on the way out, so the
@@ -325,11 +328,11 @@ async function main() {
     second.start({ serverUrl: GAME_ORIGIN, gameWindowPid: process.pid });
     await sleep(400);
     await post(second.snapshot().port, '/presence', PRESENCE_PAYLOAD, GAME_ORIGIN);
-    assert.strictEqual(discord.state.activities.length, 15);
+    assert.strictEqual(discord.state.activities.length, 18);
     second.stop();
     await sleep(300);
-    assert.strictEqual(discord.state.activities.length, 16);
-    assert.strictEqual(discord.state.activities[15].activity, null);
+    assert.strictEqual(discord.state.activities.length, 19);
+    assert.strictEqual(discord.state.activities[18].activity, null);
 
     await discord.close();
     fs.rmSync(runtimeDir, { recursive: true, force: true });
