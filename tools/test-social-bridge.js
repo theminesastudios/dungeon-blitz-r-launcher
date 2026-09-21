@@ -287,13 +287,17 @@ async function testDiscordAuthorization(mock, mockUrl, tmp) {
  * second session's events went nowhere and the window kept showing a lobby that was gone.
  */
 async function testLobbyRestart(mock, mockUrl, tmp) {
-    const directory = fs.mkdtempSync(path.join('/tmp', 'dipc3-'));
+    // Same as phase 1: /tmp on POSIX for the socket path cap, the temp dir on Windows, and
+    // the mock's own pipe name so a running Discord never answers instead.
+    const directory = fs.mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'dipc3-'));
     const previousEnv = {
         TMPDIR: process.env.TMPDIR,
-        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR
+        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+        DUNGEON_BLITZ_DISCORD_SOCKET_NAME: process.env.DUNGEON_BLITZ_DISCORD_SOCKET_NAME
     };
     process.env.TMPDIR = `${directory}/`;
     process.env.XDG_RUNTIME_DIR = directory;
+    process.env.DUNGEON_BLITZ_DISCORD_SOCKET_NAME = 'dblr-test-';
     const ipc = await startMockDiscordIpc(directory);
     const tokenCachePath = path.join(tmp, 'token-restart.json');
     const openUrl = () => assert.fail('no browser may be opened');
