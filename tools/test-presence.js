@@ -142,7 +142,7 @@ async function main() {
     process.env.XDG_RUNTIME_DIR = runtimeDir;
     process.env.DUNGEON_BLITZ_DISCORD_SOCKET_NAME = 'dblr-test-';
     const discord = await startMockDiscord(
-        isWindows ? '\\\\.\\pipe\\dblr-test-discord-ipc-0' : path.join(runtimeDir, 'discord-ipc-0')
+        isWindows ? '\\\\.\\pipe\\dblr-test-discord-ipc-0' : path.join(runtimeDir, 'dblr-test-discord-ipc-0')
     );
 
     const { PresenceBridge } = require('../lib/presence');
