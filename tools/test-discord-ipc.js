@@ -80,7 +80,7 @@ function startMockDiscord(directory) {
         const endpoint =
             process.platform === 'win32'
                 ? '\\\\.\\pipe\\dblr-test-discord-ipc-0'
-                : path.join(directory, 'discord-ipc-0');
+                : path.join(directory, 'dblr-test-discord-ipc-0');
         server.listen(endpoint, () => resolve({ server, seen }));
     });
 }
