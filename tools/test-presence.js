@@ -182,7 +182,7 @@ async function main() {
     // carries `secrets`, and the Play Game button is the presence players actually had.
     assert.strictEqual(activity.secrets, undefined, 'no join secret, so the button survives');
     assert.strictEqual(activity.assets.small_image, 'warrior');
-    assert.strictEqual(activity.assets.small_text, 'BridgeProbe - Warrior');
+    assert.strictEqual(activity.assets.small_text, 'Warrior', 'the hover text names the class, never the character');
     assert.strictEqual(activity.assets.large_image, 'home', 'CraftTown falls back to the home artwork');
     assert.strictEqual(activity.assets.large_text, 'Home');
 
@@ -272,12 +272,28 @@ async function main() {
     assert.strictEqual(discord.state.activities.length, 14);
     assert.strictEqual(discord.state.activities[13].activity, null);
 
+    // A player roaming alone has both lines empty. That is still a presence -- the app name,
+    // artwork and timer -- with the empty lines left off, not a cleared activity. Only the
+    // dungeon line comes back when it has text.
+    const roaming = await post(port, '/presence', { ...PRESENCE_PAYLOAD, details: '', state: '' }, GAME_ORIGIN);
+    assert.strictEqual(roaming.status, 200, 'empty lines are an update, not a clear');
+    assert.strictEqual(discord.state.activities.length, 15);
+    const roamingActivity = discord.state.activities[14].activity;
+    assert.ok(roamingActivity, 'the activity is kept');
+    assert.ok(!('details' in roamingActivity), 'an empty first line is not sent');
+    assert.ok(!('state' in roamingActivity), 'an empty second line is not sent');
+    assert.ok(roamingActivity.timestamps, 'the timer stays');
+    await post(port, '/presence', { ...PRESENCE_PAYLOAD, details: 'In Party', state: '' }, GAME_ORIGIN);
+    const partyActivity = discord.state.activities[15].activity;
+    assert.strictEqual(partyActivity.details, 'In Party');
+    assert.ok(!('state' in partyActivity), 'one empty line is left off on its own');
+
     // Any other game page gets nothing: a browser tab on some other site cannot write to
     // the player's Discord profile through this endpoint.
     const refused = await post(port, '/presence', PRESENCE_PAYLOAD, 'http://evil.example.test');
     assert.strictEqual(refused.status, 403);
     assert.strictEqual(refused.body.reason, 'origin-not-allowed');
-    assert.strictEqual(discord.state.activities.length, 14, 'a refused origin never reaches Discord');
+    assert.strictEqual(discord.state.activities.length, 16, 'a refused origin never reaches Discord');
 
     // /configure is what the page uses to learn where to send a party join.
     const configured = await post(port, '/configure', { characterName: 'BridgeProbe' }, GAME_ORIGIN);
