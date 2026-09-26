@@ -6,6 +6,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 
 const { ChatRelay } = require('./lib/chatRelay');
 const { GameStats } = require('./lib/gameStats');
+const { createLauncherSessionRecovery } = require('./lib/launcherSessionRecovery');
 const discordAuth = require('./lib/discordAuth');
 const { exists, inspectInstallLocation, isWritableDirectory } = require('./lib/install');
 const { findFlashPlugin, findVendoredPlugin } = require('./lib/flash');
@@ -687,6 +688,11 @@ function forgetDiscordLogin() {
  * the launcher used to ask again on the next launch. The server can tell who is behind
  * the connection that is asking, and only while that connection is in the game, so this
  * runs while a game session is up and remembers what it finds.
+ *
+ * Knowing the name is not enough on its own: the routes that do something *as* the player --
+ * the widget sync, the linked lobby -- take the device token, and the player who signed in
+ * inside the game is exactly the one with no token here. So the same moment is used to take
+ * the token too, before the sign-in that proves it goes stale (see below).
  */
 async function refreshDiscordAccount() {
     const { selected } = resolveSelectedServer();
@@ -704,20 +710,63 @@ async function refreshDiscordAccount() {
         rememberDiscordLogin(account.email, name);
         pushState();
     }
+
+    return captureLauncherSessionFromGameSession();
+}
+
+// The device token, for a player who signed in with Discord inside the game rather than through
+// the launcher's own sign-in button. Without it the widget sync has nobody to ask about itself
+// and answers 401 forever for those players, which is what made the widget appear for some and
+// never for others. lib/launcherSessionRecovery.js holds the rules; this is only the wiring.
+const sessionRecovery = createLauncherSessionRecovery({
+    readToken: () => sessionCache.read().token,
+    // Read at the moment of asking: the player can switch servers between plays.
+    issueSession: () => {
+        const { selected } = resolveSelectedServer();
+        return selected ? discordAuth.issueSession(selected.url) : null;
+    },
+    onCaptured: (token, email) => sessionCache.write(token, email)
+});
+
+/**
+ * Tries to take a device token from the sign-in this game session is running on.
+ *
+ * @returns {Promise<boolean>} Whether one was taken, so the caller can ask the server again
+ *   for what the missing token just refused: a widget profile to write.
+ */
+async function captureLauncherSessionFromGameSession() {
+    const result = await sessionRecovery.capture();
+    if (!result.captured) {
+        return false;
+    }
+
+    console.log('[LauncherSession] Took a device token from the game session\'s own Discord sign-in');
+    return true;
 }
 
 // The game session appears a few seconds after the window opens, so the account is looked
-// up again for a short while rather than once at the wrong moment.
+// up again for a short while rather than once at the wrong moment -- and for a little longer
+// than it takes to see the name, because a sign-in the player completes inside the game is
+// what the device token is captured from, and the server keeps the proof of that sign-in for
+// two minutes. A poll that stopped at the first name it read would miss it.
 let accountPollTimer = null;
 let accountPollAttempts = 0;
+const ACCOUNT_POLL_ATTEMPTS = 24;
 
 function startAccountPolling() {
     stopAccountPolling();
     accountPollAttempts = 0;
+    sessionRecovery.reset();
     accountPollTimer = setInterval(() => {
         accountPollAttempts += 1;
-        void refreshDiscordAccount();
-        if (discordAccount.linked || accountPollAttempts >= 12) {
+        void refreshDiscordAccount().then((captured) => {
+            // A token taken after the widget ask means the ask was refused for want of it, and
+            // the answer is a profile Discord can now be written for.
+            if (captured) {
+                void gameStats.sync();
+            }
+        });
+        if (accountPollAttempts >= ACCOUNT_POLL_ATTEMPTS) {
             stopAccountPolling();
         }
     }, 5000);
@@ -911,6 +960,12 @@ function registerIpc() {
     // The manual retry, for the player who just linked their Discord account and wants the
     // widget filled without opening the game again.
     ipcMain.handle('launcher:gameStatsSync', async () => {
+        // The player presses this right after signing in with Discord inside the game, which is
+        // the moment the widget usually needs a nudge -- and by then the account poll has long
+        // since stopped, so the device token for that sign-in is taken here instead. The ask
+        // then follows it: a launcher with no token has nobody to be written for.
+        sessionRecovery.reset();
+        await refreshDiscordAccount();
         await gameStats.sync();
         return gameStatsSummary();
     });
