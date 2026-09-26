@@ -125,7 +125,7 @@ function main() {
                 ? `${socialBuilt.join(', ')} (built)`
                 : socialPayload.length
                   ? `${socialPayload.join(', ')} (payload)`
-                  : '(none - lobby chat will not work)'
+                  : '(none in payload - the JS driver still provides lobby chat)'
         }`
     );
 }
