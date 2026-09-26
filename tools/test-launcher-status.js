@@ -362,10 +362,6 @@ function main() {
     rows = rowsFrom(registry);
     assert.strictEqual(row(rows, 'Update').value, 'off in this build');
     assert.strictEqual(registry.get('update-install').hidden, true);
-    assert.strictEqual(registry.get('update-check').hidden, true, 'no manual check where the updater is off');
-
-    render(baseState(ARMED_FLASH, IDLE_SOCIAL));
-    assert.strictEqual(registry.get('update-check').hidden, false, 'the manual check button is available in a working build');
 
     // A remembered account replaces the sign-in button entirely.
     render(

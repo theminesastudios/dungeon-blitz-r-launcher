@@ -13,7 +13,6 @@ contextBridge.exposeInMainWorld('launcher', {
     moveToApplications: () => ipcRenderer.invoke('launcher:moveToApplications'),
     relaunch: () => ipcRenderer.invoke('launcher:relaunch'),
     quit: () => ipcRenderer.invoke('launcher:quit'),
-    updateCheck: () => ipcRenderer.invoke('launcher:updateCheck'),
     updateInstall: () => ipcRenderer.invoke('launcher:updateInstall'),
     gameStatsSync: () => ipcRenderer.invoke('launcher:gameStatsSync'),
     onState: (handler) => {

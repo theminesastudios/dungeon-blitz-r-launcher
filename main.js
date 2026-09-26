@@ -906,12 +906,6 @@ function registerIpc() {
 
     ipcMain.handle('launcher:moveToApplications', () => moveToApplications());
 
-    ipcMain.handle('launcher:updateCheck', () => {
-        if (updateService) {
-            updateService.checkNow();
-        }
-        return updateService ? updateService.summary() : null;
-    });
     ipcMain.handle('launcher:updateInstall', () => (updateService ? updateService.restartToUpdate() : false));
 
     // The manual retry, for the player who just linked their Discord account and wants the
