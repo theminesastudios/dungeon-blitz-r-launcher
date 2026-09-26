@@ -16,6 +16,7 @@
     "make-icons": "node tools/make-icons.js",
     "test-updater": "node tools/test-updater.js",
     "fetch-payload": "node tools/fetch-payload.js",
+    "build-payload-store": "node tools/build-payload-store.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",

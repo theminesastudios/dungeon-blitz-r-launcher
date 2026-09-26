@@ -98,6 +98,36 @@ shipping a launcher that greets the player with a refusal dialog. Pass
 node tools/test-fetch-payload.js   # platform filtering, digests, and redirect refusal, against a mock store
 ```
 
+### Standing the store up
+
+The store is just the `payload/` directory with a manifest at its root, so publishing it
+means uploading that one directory to somewhere that serves files over https. Build the
+manifest after staging the binaries:
+
+```bash
+npm run build-payload-store
+# wrote 9 entries to payload/manifest.json
+```
+
+It hashes what is actually staged, so a platform you never staged is simply absent from
+the manifest and its release job fails at preflight — which is the honest outcome, rather
+than an entry advertising a file that is not there. `--check` exits non-zero when the
+manifest on disk is stale, which is worth wiring into CI if you re-stage often.
+
+Then upload the contents of `payload/` to the store, and set on the repository:
+
+| | |
+| --- | --- |
+| `PAYLOAD_STORE_URL` | a repository **variable** — the store's base URL, not a secret |
+| `PAYLOAD_STORE_TOKEN` | a repository **secret** — a read-only credential for that store |
+
+Until both exist, the release job fails at "Fetch proprietary binaries" on the next
+version bump. Nothing has failed yet, because the workflow only triggers on a
+`package.json` version change.
+
+A read-only token is genuinely read-only, and worth keeping that way: the store's contents
+end up inside a signed installer, so the token needs read access and nothing more.
+
 ## Flash plugin
 
 ```bash

@@ -26,6 +26,7 @@ const {
     parseStoreUrl,
     safeRelativePath
 } = require('./fetch-payload');
+const { buildManifest } = require('./build-payload-store');
 
 const FLASH_DLL = Buffer.from('not really a pe dll, but it has the right digest');
 const BRIDGE_EXE = Buffer.from('not really a bridge either');
@@ -278,7 +279,56 @@ async function main() {
     await other.close();
     fs.rmSync(redirectTarget, { recursive: true, force: true });
 
+    // The manifest builder and the fetcher are a pair: what one writes, the other has to
+    // accept. Round-tripping them here is what stops a change to either from quietly
+    // producing a store the release job cannot read.
+    const pairRoot = tempRoot();
+    const payloadDir = path.join(pairRoot, 'payload');
+    const staged = [
+        ['flash', 'win32', path.join('pepflashplayer64.dll')],
+        ['social', 'win32', path.join('discord_social_bridge.exe')]
+    ];
+    for (const [kind, platform, relative] of staged) {
+        const file = path.join(payloadDir, kind, platform, relative);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, Buffer.from(`body of ${kind}/${platform}/${relative}`));
+    }
+    const manifestPath = path.join(payloadDir, 'manifest.json');
+    const { manifest } = buildManifest(payloadDir);
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const pairStore = await new Promise((resolve) => {
+        const srv = http.createServer((req, res) => {
+            const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '');
+            const file = path.join(payloadDir, rel);
+            if (!file.startsWith(payloadDir) || !fs.existsSync(file)) {
+                res.statusCode = 404;
+                return res.end();
+            }
+            res.end(fs.readFileSync(file));
+        });
+        srv.listen(0, '127.0.0.1', () => resolve(srv));
+    });
+    const pairUrl = `http://127.0.0.1:${pairStore.address().port}/`;
+
+    const roundTrip = tempRoot();
+    const fetched = await fetchPayload({ storeUrl: pairUrl, platform: 'win32', targetRoot: roundTrip });
+    assert.strictEqual(fetched.results.length, 2, 'both staged win32 files were fetched');
+    for (const [kind, platform, relative] of staged) {
+        const landed = path.join(roundTrip, kind, platform, relative);
+        assert.deepStrictEqual(
+            fs.readFileSync(landed),
+            fs.readFileSync(path.join(payloadDir, kind, platform, relative)),
+            `${kind}/${platform}/${relative} round-trips byte for byte`
+        );
+    }
+
+    await new Promise((done) => pairStore.close(done));
+    fs.rmSync(pairRoot, { recursive: true, force: true });
+    fs.rmSync(roundTrip, { recursive: true, force: true });
+
     console.log('[test-fetch-payload] one platform at a time, digest-checked, token never leaves the store: OK');
+    console.log('[test-fetch-payload] the built manifest round-trips through the fetcher: OK');
     console.log('[test-fetch-payload] all assertions passed');
 }
 
