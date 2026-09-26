@@ -64,8 +64,9 @@ function copyRecursive(source, target) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(source, target);
     // The bridge has to stay executable; copyFileSync does not carry the mode over on
-    // every filesystem CI runs on.
-    if (/discord_social_bridge$/.test(source)) {
+    // every filesystem CI runs on. The Windows bridge carries an extension, so match it
+    // as well or the pattern quietly stops covering it.
+    if (/discord_social_bridge(\.exe)?$/.test(source)) {
         fs.chmodSync(target, 0o755);
     }
 }

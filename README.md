@@ -25,8 +25,12 @@ keys a pending sign-in by requester address, so the launcher's poll still sees t
 
 | Folder | What | In git |
 | --- | --- | --- |
-| `payload/` | The **source** of the binaries a package ships | Yes, via Git LFS |
+| `payload/` | Where the binaries a package ships are staged | No, gitignored |
 | `vendor/` | Build output — what packaging reads | No, gitignored |
+
+Neither is in the repository. The Flash plugin and the Discord Partner SDK are not ours to
+redistribute, and this repository is public, so they are fetched at build time instead of
+carried in the checkout. (`vendor/` still has to be gitignored on its own: it is generated.)
 
 `tools/stage-vendor.js` copies `payload/` (and a freshly built native bridge, when there is
 one) into `vendor/`. Locally, `tools/extract-flash.js` writes straight into `vendor/`. Both
@@ -35,6 +39,63 @@ produce the same layout.
 ```text
 payload/flash/<platform>/     pepflashplayer64.dll | PepperFlashPlayer.plugin | libpepflashplayer.so
 payload/social/<platform>/    discord_social_bridge[.exe] + the SDK runtime library
+```
+
+## Staging the binaries
+
+Two ways in, and both land in the same place.
+
+**`npm run fetch-payload`** pulls one platform's files from a private store. It is what the
+release workflow uses, and it needs two variables:
+
+```bash
+export PAYLOAD_STORE_URL=https://storage.example.com/dungeon-blitz-r
+export PAYLOAD_STORE_TOKEN=...            # a read-only token for that prefix
+npm run fetch-payload -- --platform darwin
+```
+
+The store is plain static hosting — an S3 prefix or a private GitHub release will do. It
+serves a manifest and the files beside it:
+
+```text
+<store>/manifest.json
+<store>/<kind>/<platform>/<path>
+```
+
+```json
+{
+  "version": 1,
+  "files": [
+    {
+      "kind": "flash",
+      "platform": "darwin",
+      "path": "PepperFlashPlayer.plugin/Contents/MacOS/PepperFlashPlayer",
+      "sha256": "…",
+      "size": 27234304
+    }
+  ]
+}
+```
+
+A manifest rather than an archive so a runner downloads only the platform it is building,
+and so each file is checksummed on its own: a file whose digest does not match is refused,
+not written. The token is sent only to the store's own host — a redirect to somewhere else
+is refused rather than followed, and a plain `http` store is only allowed on loopback.
+
+Files already staged with the right digest are left alone, so re-running is cheap. `--force`
+re-fetches them. **A checkout with no store configured still builds** if the binaries are
+already in `payload/`, which is what `npm run dist` relies on after a manual stage.
+
+**`npm run extract-flash`** is the other way, for a machine that has a FlashBrowser install
+or a plugin lying around. It writes into `vendor/` directly and needs no store.
+
+Either way, `npm run dist:*` runs the fetch and then `tools/preflight.js`, which refuses to
+build a package that cannot play the game — a missing plugin fails the build rather than
+shipping a launcher that greets the player with a refusal dialog. Pass
+`DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1` for a deliberate Flash-less package.
+
+```bash
+node tools/test-fetch-payload.js   # platform filtering, digests, and redirect refusal, against a mock store
 ```
 
 ## Flash plugin
@@ -174,7 +235,7 @@ launcher asks once per game session, identified by the launcher token it resumed
 and the `Game stats` row reports what came back: `profile written`; `no Discord account
 linked` (the server answered `discord-not-linked`, or an HTTP 409); `server cannot write it`
 (a 404 -- no such route yet); or `failed` with the server's own words. `Sync game stats`
-next to `Check for updates` retries by hand, which is what a player does right after linking
+under the status rows retries by hand, which is what a player does right after linking
 inside the game. Disable all of it with `DUNGEON_BLITZ_GAME_STATS=0`.
 
 Writing also needs the player's link to grant `application_identities.write`. The consent
@@ -279,6 +340,39 @@ device authorization; without it the SDK does not return an error, it aborts the
 process on a failed `CanAuthorizeDevice` check. The browser PKCE flow needs no such
 capability.
 
+### Linking a lobby to your own channel
+
+Linking a lobby to a Discord text channel is **per-player and off by default**, so a fresh
+checkout never points at somebody else's channel. `social.config.json` ships both values
+empty:
+
+```json
+{ "channelId": "", "enableChannelLinking": false }
+```
+
+To link your own, set your channel's ID and turn the feature on, then restart the launcher:
+
+```bash
+# right-click the channel -> Copy Channel ID
+"channelId": "your-channel-id",
+"enableChannelLinking": true
+```
+
+The channel has to be one the Discord application (the `appId` above) can see, and the link
+only takes effect once the launcher holds a signed-in player token -- `lib/socialJs.js` calls
+`linkChannelToLobby` and then keeps the lobby's `linked_channel` in step. Discord caps these
+calls hard while an application is unapproved (20 per 2 hours), which is why the launcher
+only calls when the lobby's channel actually differs from yours.
+
+`lobbySecret` may stay empty: it defaults to `launcher-<appId>`, and it is not a credential
+-- Discord treats an activity carrying a `secrets` field as a joinable one and hides the
+buttons behind Ask to Join, so this launcher deliberately never sends one.
+
+If you have a checkout of the game repository next to this one, put the same keys in its
+`src/server/discord-social-bridge.config.json` instead and they will override
+`social.config.json` (see [the game repository](#optional-the-game-repository)) -- that file
+is where a shared setup belongs, since it is not part of this repository.
+
 ## Running and packaging
 
 ```bash
@@ -348,8 +442,10 @@ An installed launcher updates itself. `lib/update.js` wraps electron-updater wit
 releases as the feed (`build.publish` in package.json): it checks a few seconds after
 start and then every six hours, downloads a new version in the background and shows an
 `Update` row in the status strip -- `downloading 1.1.0 - 42%`, then `1.1.0 ready -
-restart to install` with a **Restart to update** button. Nothing forces the restart while
-the game might be open; if the player ignores the prompt, the update still installs on
+restart to install` with a **Restart to update** button. There is no manual check button:
+the schedule above is the only way a check is triggered, so a player waiting on a release
+waits for the next six-hour tick (or the update lands on quit). Nothing forces the restart
+while the game might be open; if the player ignores the prompt, the update still installs on
 the next quit (`autoInstallOnAppQuit`). Dev checkouts and dev AppImages never self-update.
 
 Two feed rules are easy to trip over: the release job uploads the `latest*.yml` metadata
@@ -388,6 +484,7 @@ the module against a local mock.
 | `tools/test-discord-ipc.js` | The RPC framing, `AUTHORIZE` payload and PING/PONG |
 | `tools/test-launcher-status.js` | Every state of the status strip and the account row |
 | `tools/test-install-location.js` | Disk-image and Downloads detection, and what is deliberately not flagged |
+| `tools/test-fetch-payload.js` | Platform filtering, checksum refusal and redirect handling, against a mock store |
 
 `.github/workflows/tests.yml` runs them on every push and pull request, so a broken Flash
 guard, presence mapping or chat relay fails before an installer is built.

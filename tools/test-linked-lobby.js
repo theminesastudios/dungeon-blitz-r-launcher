@@ -78,7 +78,7 @@ async function main() {
     function config(overrides = {}) {
         return {
             appId: '1447954255452311695',
-            channelId: '000000000000000000',
+            channelId: 'chan-linked-lobby-test',
             enableChannelLinking: true,
             lobbySecret: 'launcher-test',
             apiBaseUrl: discord.url,
@@ -97,7 +97,7 @@ async function main() {
     }
 
     // The server adds us to its linked lobby: that lobby is used, and nothing is relinked.
-    joinAnswers = [[200, { ok: true, lobbyId: '1486840108173758666', linkedChannelId: '000000000000000000' }]];
+    joinAnswers = [[200, { ok: true, lobbyId: '1486840108173758666', linkedChannelId: 'chan-linked-lobby-test' }]];
     let bridge = new JsSocialBridge({ openUrl() {} });
     let cfg = config();
     let result = await enter(bridge, cfg);
@@ -112,7 +112,7 @@ async function main() {
     joins.length = 0;
     joinAnswers = [
         [401, { ok: false, reason: 'unknown-requester' }],
-        [200, { ok: true, lobbyId: '1486840108173758666', linkedChannelId: '000000000000000000' }]
+        [200, { ok: true, lobbyId: '1486840108173758666', linkedChannelId: 'chan-linked-lobby-test' }]
     ];
     bridge = new JsSocialBridge({ openUrl() {} });
     const realSetTimeout = global.setTimeout;

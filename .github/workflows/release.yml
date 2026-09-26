@@ -35,7 +35,6 @@ jobs:
         with:
           # The previous commit is needed to tell a version bump from any other edit.
           fetch-depth: 2
-          lfs: false
 
       - name: Compare versions
         id: check
@@ -91,9 +90,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # payload/ holds the Flash plugin and the prebuilt bridges.
-          lfs: true
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -107,11 +103,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libpulse-dev
 
+      - name: Fetch proprietary binaries
+        shell: bash
+        # Neither the Flash plugin nor the Discord Partner SDK is ours to redistribute, so
+        # neither is in this repository. They come from a private store, one platform per
+        # runner, and the bridge is rebuilt from source here when the SDK is supplied.
+        run: node tools/fetch-payload.js --platform ${{ matrix.platform }}
+        env:
+          PAYLOAD_STORE_URL: ${{ vars.PAYLOAD_STORE_URL }}
+          PAYLOAD_STORE_TOKEN: ${{ secrets.PAYLOAD_STORE_TOKEN }}
+
       - name: Build Discord Social SDK bridge
         shell: bash
-        # The SDK is not redistributable, so it is not in this repository. When a job
-        # supplies it the bridge is rebuilt from source; otherwise the prebuilt binary in
-        # payload/social/<platform>/ is used as-is.
+        # With the SDK present, the bridge is compiled per platform rather than taken
+        # prebuilt; either way stage-vendor picks up whatever is in payload/social/.
         run: |
           if [ ! -d native_bridge/discord_social_sdk ]; then
             echo "Social SDK not present; using the prebuilt bridge from payload/."
