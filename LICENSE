@@ -24,10 +24,11 @@ SOFTWARE.
 
 This license covers the launcher source in this repository only.
 
-It does not cover the binaries a release ships, which are staged at build time
-and are not part of this repository:
+It does not cover the third-party binaries under `payload/`, which are carried
+in the repository through Git LFS and shipped inside a release:
 
   - Adobe Flash Player (PPAPI), redistributed by no license of Adobe's.
-  - The Discord Social SDK, which is separately licensed by Discord.
+  - The Discord Social SDK and its prebuilt bridge, separately licensed by
+    Discord.
 
 See README.md, "Binaries: payload/ and vendor/".

@@ -1,3 +1,8 @@
 *.sh text eol=lf
 *.bat text eol=crlf
 *.ps1 text eol=crlf
+
+# The Flash plugin and the Discord Social SDK bridge that a packaged launcher ships.
+# Binary, large, and rebuilt rarely -- Git LFS, and lockable so two people cannot edit
+# the same binary in parallel.
+payload/** filter=lfs diff=lfs merge=lfs -text lockable

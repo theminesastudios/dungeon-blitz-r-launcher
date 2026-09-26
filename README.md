@@ -25,12 +25,8 @@ keys a pending sign-in by requester address, so the launcher's poll still sees t
 
 | Folder | What | In git |
 | --- | --- | --- |
-| `payload/` | Where the binaries a package ships are staged | No, gitignored |
+| `payload/` | The **source** of the binaries a package ships | Yes, via Git LFS |
 | `vendor/` | Build output — what packaging reads | No, gitignored |
-
-Neither is in the repository. The Flash plugin and the Discord Partner SDK are not ours to
-redistribute, and this repository is public, so they are fetched at build time instead of
-carried in the checkout. (`vendor/` still has to be gitignored on its own: it is generated.)
 
 `tools/stage-vendor.js` copies `payload/` (and a freshly built native bridge, when there is
 one) into `vendor/`. Locally, `tools/extract-flash.js` writes straight into `vendor/`. Both
@@ -40,93 +36,6 @@ produce the same layout.
 payload/flash/<platform>/     pepflashplayer64.dll | PepperFlashPlayer.plugin | libpepflashplayer.so
 payload/social/<platform>/    discord_social_bridge[.exe] + the SDK runtime library
 ```
-
-## Staging the binaries
-
-Two ways in, and both land in the same place.
-
-**`npm run fetch-payload`** pulls one platform's files from a private store. It is what the
-release workflow uses, and it needs two variables:
-
-```bash
-export PAYLOAD_STORE_URL=https://storage.example.com/dungeon-blitz-r
-export PAYLOAD_STORE_TOKEN=...            # a read-only token for that prefix
-npm run fetch-payload -- --platform darwin
-```
-
-The store is plain static hosting — an S3 prefix or a private GitHub release will do. It
-serves a manifest and the files beside it:
-
-```text
-<store>/manifest.json
-<store>/<kind>/<platform>/<path>
-```
-
-```json
-{
-  "version": 1,
-  "files": [
-    {
-      "kind": "flash",
-      "platform": "darwin",
-      "path": "PepperFlashPlayer.plugin/Contents/MacOS/PepperFlashPlayer",
-      "sha256": "…",
-      "size": 27234304
-    }
-  ]
-}
-```
-
-A manifest rather than an archive so a runner downloads only the platform it is building,
-and so each file is checksummed on its own: a file whose digest does not match is refused,
-not written. The token is sent only to the store's own host — a redirect to somewhere else
-is refused rather than followed, and a plain `http` store is only allowed on loopback.
-
-Files already staged with the right digest are left alone, so re-running is cheap. `--force`
-re-fetches them. **A checkout with no store configured still builds** if the binaries are
-already in `payload/`, which is what `npm run dist` relies on after a manual stage.
-
-**`npm run extract-flash`** is the other way, for a machine that has a FlashBrowser install
-or a plugin lying around. It writes into `vendor/` directly and needs no store.
-
-Either way, `npm run dist:*` runs the fetch and then `tools/preflight.js`, which refuses to
-build a package that cannot play the game — a missing plugin fails the build rather than
-shipping a launcher that greets the player with a refusal dialog. Pass
-`DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1` for a deliberate Flash-less package.
-
-```bash
-node tools/test-fetch-payload.js   # platform filtering, digests, and redirect refusal, against a mock store
-```
-
-### Standing the store up
-
-The store is just the `payload/` directory with a manifest at its root, so publishing it
-means uploading that one directory to somewhere that serves files over https. Build the
-manifest after staging the binaries:
-
-```bash
-npm run build-payload-store
-# wrote 9 entries to payload/manifest.json
-```
-
-It hashes what is actually staged, so a platform you never staged is simply absent from
-the manifest and its release job fails at preflight — which is the honest outcome, rather
-than an entry advertising a file that is not there. `--check` exits non-zero when the
-manifest on disk is stale, which is worth wiring into CI if you re-stage often.
-
-Then upload the contents of `payload/` to the store, and set on the repository:
-
-| | |
-| --- | --- |
-| `PAYLOAD_STORE_URL` | a repository **variable** — the store's base URL, not a secret |
-| `PAYLOAD_STORE_TOKEN` | a repository **secret** — a read-only credential for that store |
-
-Until both exist, the release job fails at "Fetch proprietary binaries" on the next
-version bump. Nothing has failed yet, because the workflow only triggers on a
-`package.json` version change.
-
-A read-only token is genuinely read-only, and worth keeping that way: the store's contents
-end up inside a signed installer, so the token needs read access and nothing more.
 
 ## Flash plugin
 
@@ -514,7 +423,6 @@ the module against a local mock.
 | `tools/test-discord-ipc.js` | The RPC framing, `AUTHORIZE` payload and PING/PONG |
 | `tools/test-launcher-status.js` | Every state of the status strip and the account row |
 | `tools/test-install-location.js` | Disk-image and Downloads detection, and what is deliberately not flagged |
-| `tools/test-fetch-payload.js` | Platform filtering, checksum refusal and redirect handling, against a mock store |
 
 `.github/workflows/tests.yml` runs them on every push and pull request, so a broken Flash
 guard, presence mapping or chat relay fails before an installer is built.

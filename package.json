@@ -12,18 +12,16 @@
   "scripts": {
     "start": "electron .",
     "extract-flash": "node tools/extract-flash.js",
-    "test": "node tools/test-presence.js && node tools/test-chat-relay.js && node tools/test-game-stats.js && node tools/test-linked-lobby.js && node tools/test-social-bridge.js && node tools/test-discord-ipc.js && node tools/test-launcher-status.js && node tools/test-install-location.js && node tools/test-package-files.js && node tools/test-fetch-payload.js && node tools/test-updater.js",
+    "test": "node tools/test-presence.js && node tools/test-chat-relay.js && node tools/test-game-stats.js && node tools/test-linked-lobby.js && node tools/test-social-bridge.js && node tools/test-discord-ipc.js && node tools/test-launcher-status.js && node tools/test-install-location.js && node tools/test-package-files.js && node tools/test-updater.js",
     "make-icons": "node tools/make-icons.js",
     "test-updater": "node tools/test-updater.js",
-    "fetch-payload": "node tools/fetch-payload.js",
-    "build-payload-store": "node tools/build-payload-store.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
     "dist:linux": "electron-builder --linux",
-    "predist:win": "node tools/fetch-payload.js --platform win32 && node tools/preflight.js --platform win32",
-    "predist:mac": "node tools/fetch-payload.js --platform darwin && node tools/preflight.js --platform darwin",
-    "predist:linux": "node tools/fetch-payload.js --platform linux && node tools/preflight.js --platform linux",
+    "predist:win": "node tools/preflight.js --platform win32",
+    "predist:mac": "node tools/preflight.js --platform darwin",
+    "predist:linux": "node tools/preflight.js --platform linux",
     "build:bridge": "cmake -S native_bridge -B native_bridge/build -DCMAKE_BUILD_TYPE=Release && cmake --build native_bridge/build --config Release"
   },
   "devDependencies": {

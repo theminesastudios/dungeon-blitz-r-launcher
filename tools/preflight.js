@@ -111,8 +111,8 @@ function checkFlash(platform) {
     console.error(`[preflight] ERROR: no Flash plugin for ${platform} in vendor/.`);
     console.error(`[preflight] Expected: ${directory}${path.sep}${EXPECTED[platform]}`);
     console.error('[preflight] A package without it cannot play: the packaged launcher refuses to start and');
-    console.error('[preflight] names the build incomplete. Stage the plugin with `npm run fetch-payload` (needs');
-    console.error('[preflight] PAYLOAD_STORE_URL) or `npm run extract-flash` on this machine, then rebuild.');
+    console.error('[preflight] names the build incomplete. Put the plugin in payload/flash/<platform>/ or run');
+    console.error('[preflight] `npm run extract-flash` on this machine, then rebuild.');
     console.error('[preflight] A deliberate Flash-less package needs DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1.');
     console.error('');
     return false;

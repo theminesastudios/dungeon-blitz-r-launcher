@@ -5,10 +5,5 @@ vendor/
 /flash/
 .DS_Store
 
-# The Flash plugin and the Discord Partner SDK are not ours to redistribute, so they are
-# staged locally (tools/fetch-payload.js, tools/extract-flash.js) and never committed.
-# vendor/ is what packaging reads; payload/ is where they are put first.
-payload/
-
 # Local state from a private build tool. Nothing in this repository reads it.
 .freebuff/
