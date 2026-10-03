@@ -14,6 +14,7 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
 const path = require('path');
 
 const { REQUIRED_ROOT_FILES, findUnpackagedFiles, isCovered, matchesPattern } = require('../lib/packageFiles');
@@ -37,18 +38,18 @@ function main() {
         `package.json build.files must ship ${REQUIRED_ROOT_FILES.join(', ')} and lib/ + renderer/`
     );
 
-    // Each Windows target names exactly one architecture, and both architectures are
-    // present. This is the difference between two packages and three.
+    // Each Windows target names exactly one architecture, and the 32-bit installers come
+    // from a separate electron-builder run rather than from this config.
     //
-    // A target listing `["x64", "ia32"]` also produces a *universal* installer carrying
-    // both, which is what 1.0.12 shipped: `latest.yml` pointed at that ~135 MB build, so
-    // every x64 player updating from 1.0.11 downloaded roughly twice what they needed.
-    // Naming one architecture per target drops the universal package and leaves
-    // `latest.yml` pointing at win-x64-setup.exe.
+    // electron-builder emits a universal installer whenever a single run packages more
+    // than one architecture -- `NsisTarget.finishBuild()` always adds the combined build,
+    // and per-architecture ones only on top of it. Splitting the target entries does not
+    // stop that; it is the number of architectures in one *invocation* that matters.
     //
-    // Nothing else would catch a regression here: the build still succeeds, both
-    // architectures still appear in the release, and the cost only shows up in an
-    // existing player's update download.
+    // So build.win configures x64 only, and the workflow runs `--win --ia32` separately.
+    // Both arches in this file would put them back in one run, which is what 1.0.12 did:
+    // a ~135 MB universal installer that latest.yml pointed at, so every x64 player
+    // updating from 1.0.11 downloaded roughly twice what they needed.
     const winTargets = buildConfig.win.target;
 
     for (const entry of winTargets) {
@@ -57,24 +58,44 @@ function main() {
             1,
             `every build.win target must name exactly one architecture, got ${JSON.stringify(entry.arch)}`
         );
+        assert.strictEqual(
+            entry.arch[0],
+            'x64',
+            `build.win must configure x64 only; ia32 is a separate run. Found ${entry.arch[0]}`
+        );
     }
 
-    // Every architecture each target type is built for, so dropping one is caught here.
-    for (const target of ['nsis', 'portable']) {
-        const built = winTargets
-            .filter((entry) => entry.target === target)
-            .map((entry) => entry.arch[0])
-            .sort();
+    // Both installer types still have to be produced for x64.
+    assert.deepStrictEqual(
+        winTargets.map((entry) => entry.target).sort(),
+        ['nsis', 'portable'],
+        'build.win must produce an nsis and a portable installer'
+    );
 
-        assert.deepStrictEqual(
-            built,
-            ['ia32', 'x64'],
-            `${target} must be built for both x64 and ia32, one target each`
+    // And the ia32 run has to exist in the workflow, or 32-bit silently stops shipping.
+    const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf8');
+    assert.ok(
+        /builder_args:\s*--win --ia32/.test(workflow),
+        'release.yml must build Windows ia32 as its own --win --ia32 run'
+    );
+    assert.ok(
+        !/builder_args:\s*--win\s*$/.test(workflow) && !/--win --x64 --ia32/.test(workflow),
+        'no single run may package both Windows architectures: that rebuilds the universal installer'
+    );
+
+    // Both Windows jobs upload artifacts, and actions/upload-artifact rejects a duplicate
+    // name within one workflow run -- so the two Windows entries must not share one.
+    const artifactNames = [...workflow.matchAll(/name:\s*launcher-\$\{\{\s*matrix\.platform\s*\}\}([^\n]*)/g)]
+        .map((match) => (match[1] || '').trim());
+    for (const name of artifactNames) {
+        assert.ok(
+            name.includes('matrix.arch'),
+            `the Windows artifact name must include matrix.arch, or both Windows jobs collide: "${name}"`
         );
     }
 
     console.log('[test-package-files] every runtime file is covered by build.files');
-    console.log('[test-package-files] Windows targets are per-architecture, so no universal installer is built');
+    console.log('[test-package-files] Windows arches are built one per run, so no universal installer is built');
     console.log('[test-package-files] all assertions passed');
 }
 

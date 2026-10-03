@@ -68,19 +68,33 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Windows x64. ia32 is a separate entry below, not a second architecture in this
+          # one: electron-builder emits a universal installer whenever a single run
+          # packages more than one architecture, and that universal is what latest.yml
+          # points at, so every updating player downloads both arches. One run, one arch.
           - os: windows-latest
             platform: win32
-            label: Windows
-            builder_args: --win
+            arch: x64
+            label: Windows x64
+            builder_args: --win --x64
+            publish_mode: always
+          # The 32-bit installers, which install and open but cannot play: the only Flash
+          # plugin this project vendors is x86_64. Documented in the README, and
+          # tools/preflight.js says so on this run rather than shipping it silently.
+          - os: windows-latest
+            platform: win32
+            arch: ia32
+            label: Windows ia32
+            builder_args: --win --ia32
+            publish_mode: never
           # An Intel runner, because the last Flash plugin is x86_64 and a PPAPI plugin
           # must match the architecture of the process hosting it. macos-13 was retired,
-          # and a retired label does not fail -- the job simply queues forever. Windows
-          # builds x64 and ia32 from the config (--win with no --arch); the ia32 package
-          # installs but cannot play, which tools/preflight.js says out loud.
+          # and a retired label does not fail -- the job simply queues forever.
           - os: macos-15-intel
             platform: darwin
             label: macOS
             builder_args: --mac
+            publish_mode: always
           # Linux is allowed to fail: payload/flash/linux/ has never been committed, so the
           # preflight rightly refuses it, and one missing platform must not stop the
           # Windows and macOS installers from publishing. Its absence is visible in the
@@ -89,6 +103,7 @@ jobs:
             platform: linux
             label: Linux
             builder_args: --linux
+            publish_mode: always
             allow_fail: true
 
     steps:
@@ -132,14 +147,20 @@ jobs:
 
       - name: Check Flash plugin
         shell: bash
-        run: node tools/preflight.js --platform ${{ matrix.platform }}
+        run: node tools/preflight.js --platform ${{ matrix.platform }} --arch ${{ matrix.arch || 'x64' }}
 
       - name: Build installers
         # --publish always uploads the installers AND the latest*.yml metadata the
         # launcher's auto-updater reads; without those files an installed launcher can
         # never see a new release. It still needs the release job below to publish the
         # draft: GitHub's update provider cannot see a draft release.
-        run: npx electron-builder ${{ matrix.builder_args }} --publish always
+        #
+        # --publish never on the ia32 run, and its manifest is deleted below. electron-builder
+        # names the Windows update manifest `latest.yml` for EVERY architecture -- the
+        # per-arch suffix it uses on Linux is not applied to Windows -- so both runs
+        # write the same filename and whichever finishes last owns it. An ia32 manifest
+        # would point every updating x64 player at a 32-bit installer that cannot play.
+        run: npx electron-builder ${{ matrix.builder_args }} --publish ${{ matrix.publish_mode }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Unsigned builds. Signing needs the studio's certificates: CSC_LINK /
@@ -149,6 +170,18 @@ jobs:
           # self-updated, so those players update by downloading the new .dmg by hand.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
+      - name: Drop the ia32 update manifest
+        # Only x64 has one, and it must be the only `latest.yml` in the release. Deleting
+        # it here rather than in the upload path keeps this a build-time decision, so the
+        # "List what was built" step below shows what was actually kept.
+        shell: bash
+        run: |
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
+            echo "Removing the ia32 run's latest.yml; only x64 ships an update manifest."
+            ls -la dist/latest*.yml || echo "(this run produced no update manifest)"
+            rm -f dist/latest.yml dist/latest-ia32.yml
+          fi
+
       - name: List what was built
         shell: bash
         run: ls -la dist/*.exe dist/*.dmg dist/*.zip dist/*.AppImage dist/*.deb dist/latest*.yml 2>/dev/null || true
@@ -156,7 +189,9 @@ jobs:
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: launcher-${{ matrix.platform }}
+          # Per architecture, not per platform: both Windows jobs produce win32 files, and
+          # two jobs uploading the same artifact name makes the second one fail.
+          name: launcher-${{ matrix.platform }}-${{ matrix.arch || 'default' }}
           if-no-files-found: error
           path: |
             dist/*.exe

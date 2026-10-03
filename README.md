@@ -442,22 +442,39 @@ attaches the installers to a draft GitHub release tagged `v<version>`:
 | macOS | `...-mac-x64.dmg`, `...-mac-x64.zip` |
 | Linux | `...-linux-x86_64.AppImage`, `...-linux-amd64.deb` |
 
-Each `build.win` target names **exactly one** architecture, which is why there are four
-Windows files and not six. A target listing both --
+### Why Windows is built as two runs
 
-```jsonc
-{ "target": "nsis", "arch": ["x64", "ia32"] }
+electron-builder emits a **universal** installer whenever one invocation packages more
+than one architecture. Splitting `build.win.target` into separate one-architecture entries
+does not prevent it -- `NsisTarget.finishBuild()` always adds the combined build
+(`builds = new Set([this.archs])`) and only *additionally* builds per-architecture
+installers when the artifact name contains `${arch}`:
+
+```js
+const builds = new Set([this.archs]);                       // always, all arches together
+if (pattern.includes("${arch}") && this.archs.size > 1) {   // and each one on its own
+  [...this.archs].forEach(([arch, appOutDir]) => builds.add(new Map().set(arch, appOutDir)));
+}
 ```
 
--- also makes electron-builder emit a **universal** `win-setup.exe` carrying both, which
-1.0.12 shipped. It is roughly twice the size of either single-architecture package, and
-because it is what `latest.yml` points at, every x64 player updating from 1.0.11
-downloaded ~135 MB instead of ~70 MB. Two targets, one arch each, avoids it.
+So 1.0.12 shipped three packages per target -- `win-x64-*`, `win-ia32-*` and a ~135 MB
+`win-setup.exe` carrying both -- and `latest.yml` pointed at the universal one, making
+every x64 player updating from 1.0.11 download roughly twice what they needed.
+
+The fix is one electron-builder run per architecture (`--win --x64`, then `--win --ia32`),
+which is why `package.json` only configures x64 and the workflow has a separate Windows ia32
+matrix entry. Two details that are easy to get wrong:
+
+- **`latest.yml` is not per-architecture on Windows.** `getArchPrefixForUpdateFile()` only
+  adds an arch suffix on Linux, so both Windows runs write the same `latest.yml` and
+  whichever finishes last owns it. The ia32 run uses `--publish never` and its manifest is
+  deleted, so an x64 player can never be offered a 32-bit installer.
+- **The two Windows jobs upload distinct artifact names** (`launcher-win32-x64`,
+  `launcher-win32-ia32`); sharing one name makes the second upload fail.
 
 The `win-ia32` files install and open but **cannot play** -- see "32-bit Windows" above.
-`latest.yml` lists both nsis installers and its `path:` is the x64 one, so an x64 launcher
-updates with the ~70 MB package again. `electron-updater` picks the entry matching the
-installed architecture.
+They are published from an unplayable build on purpose: a 32-bit player gets the launcher
+and a named explanation instead of a download that silently does nothing.
 
 Editing `package.json` without changing the version builds nothing; the workflow compares
 against the previous commit first. A manual run builds the current version, and only

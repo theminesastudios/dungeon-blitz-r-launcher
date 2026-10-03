@@ -11,7 +11,7 @@
  * therefore fails the build; a deliberate Flash-less package has to say so with
  * DUNGEON_BLITZ_PREFLIGHT_ALLOW_NO_FLASH=1.
  *
- * Usage: node tools/preflight.js [--platform win32|darwin|linux]
+ * Usage: node tools/preflight.js [--platform win32|darwin|linux] [--arch x64|ia32]
  */
 
 const fs = require('fs');
@@ -37,6 +37,25 @@ function parsePlatform(argv) {
     return process.platform;
 }
 
+/**
+ * The architecture this invocation is building, if the caller named one.
+ *
+ * The two Windows architectures are built by two separate electron-builder runs, because
+ * one run packaging both also emits a universal installer that doubles the download for
+ * every updating player (see README "Releases"). The config therefore only lists x64, so
+ * the arch has to come from the command line for this to check the ia32 run honestly.
+ *
+ * @param {string[]} argv
+ * @returns {string} '' when no `--arch` was passed.
+ */
+function parseArch(argv) {
+    const index = argv.indexOf('--arch');
+    if (index >= 0 && argv[index + 1]) {
+        return String(argv[index + 1]);
+    }
+    return '';
+}
+
 function describeVendor(platform) {
     const directory = path.join(VENDOR_ROOT, platform);
 
@@ -60,13 +79,14 @@ function describeVendor(platform) {
 // plugin matching neither is a broken build, and a plugin matching only some of them
 // leaves the rest installing and then refusing to play, which is the 32-bit situation
 // documented in README "32-bit Windows".
-function warnIfArchUnsupported(platform, directory, pluginName) {
+function warnIfArchUnsupported(platform, directory, pluginName, arch) {
     const architectures = pluginArchitectures(path.join(directory, pluginName));
     if (!architectures.length) {
         return;
     }
 
-    const targets = configuredArchitectures(platform);
+    // One architecture per invocation, so the check is against what this run builds.
+    const targets = arch ? [arch] : configuredArchitectures(platform);
     const matching = targets.filter((target) => architectures.includes(target));
     if (matching.length === targets.length) {
         return;
@@ -98,8 +118,8 @@ function warnIfArchUnsupported(platform, directory, pluginName) {
  * The architectures package.json builds for a platform, flattened across its targets.
  *
  * @param {string} platform
- * @returns {string[]} e.g. ['x64', 'ia32'] for win32; ['x64'] when a target names none,
- *   which is electron-builder's own default of the host architecture.
+ * @returns {string[]} e.g. ['x64'] for win32. Only what the config itself names: the ia32
+ *   Windows packages come from a second electron-builder run, not from this list.
  */
 function configuredArchitectures(platform) {
     const buildConfig = require(path.join(LAUNCHER_ROOT, 'package.json')).build || {};
@@ -146,12 +166,12 @@ function checkPackagedFiles() {
     return false;
 }
 
-function checkFlash(platform) {
+function checkFlash(platform, arch) {
     const { directory, found } = describeVendor(platform);
 
     if (found.length) {
         console.log(`[preflight] ${platform}: Flash ready -> ${found.join(', ')}`);
-        warnIfArchUnsupported(platform, directory, found[0]);
+        warnIfArchUnsupported(platform, directory, found[0], arch);
         return true;
     }
 
@@ -172,7 +192,9 @@ function checkFlash(platform) {
 }
 
 function main() {
-    const platform = parsePlatform(process.argv.slice(2));
+    const argv = process.argv.slice(2);
+    const platform = parsePlatform(argv);
+    const arch = parseArch(argv);
     if (!EXPECTED[platform]) {
         console.error(`[preflight] Unknown platform: ${platform}`);
         console.error('[preflight] Expected one of: win32, darwin, linux');
@@ -181,7 +203,7 @@ function main() {
 
     // Both run either way, so fixing one failure does not hide the other.
     const filesOk = checkPackagedFiles();
-    const flashOk = checkFlash(platform);
+    const flashOk = checkFlash(platform, arch);
     if (!filesOk || !flashOk) {
         process.exit(1);
     }
