@@ -438,15 +438,20 @@ attaches the installers to a draft GitHub release tagged `v<version>`:
 
 | Platform | Files |
 | --- | --- |
-| Windows | `...-win-x64-setup.exe`, `...-win-x64-portable.exe`, `...-win-ia32-setup.exe`, `...-win-ia32-portable.exe` |
+| Windows | `...-win-setup.exe`, `...-win-portable.exe` (universal, x64 + ia32), `...-win-x64-setup.exe`, `...-win-x64-portable.exe`, `...-win-ia32-setup.exe`, `...-win-ia32-portable.exe` |
 | macOS | `...-mac-x64.dmg`, `...-mac-x64.zip` |
 | Linux | `...-linux-x86_64.AppImage`, `...-linux-amd64.deb` |
 
-The two `win-ia32` files install and open but **cannot play** -- see "32-bit Windows" above.
-Only the x64 entries go into the updater feed, because that is the build an installed
-launcher can actually be; an ia32 install is not a working install and has nothing to
-update to. electron-builder splits the Windows update manifests per architecture, so
-expect an `ia32` manifest alongside `latest.yml` in the release assets.
+Naming a target with two architectures makes electron-builder produce **three** Windows
+packages per target, not two: `win-x64-*`, `win-ia32-*`, and a **universal** `win-*` that
+carries both and picks the right one at install time. The universal one is roughly twice
+the size of either, because it holds both.
+
+The `win-ia32` files install and open but **cannot play** -- see "32-bit Windows" above.
+`latest.yml` lists all three nsis installers and its `path:` points at the **universal**
+`win-setup.exe`, so an x64 launcher updating from 1.0.11 downloads the ~135 MB universal
+package rather than the ~70 MB x64-only one. `electron-updater` resolves the right entry
+from that manifest by architecture.
 
 Editing `package.json` without changing the version builds nothing; the workflow compares
 against the previous commit first. A manual run builds the current version, and only
