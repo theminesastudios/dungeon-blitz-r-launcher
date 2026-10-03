@@ -10,6 +10,7 @@ const { createLauncherSessionRecovery } = require('./lib/launcherSessionRecovery
 const discordAuth = require('./lib/discordAuth');
 const { exists, inspectInstallLocation, isWritableDirectory } = require('./lib/install');
 const { findFlashPlugin, findVendoredPlugin } = require('./lib/flash');
+const { compatibilitySwitches, describeWindows, unsupportedWindowsMessage } = require('./lib/windowsSupport');
 const { PresenceBridge } = require('./lib/presence');
 const { SocialBridge } = require('./lib/social');
 const { createUpdateService } = require('./lib/update');
@@ -25,6 +26,14 @@ const {
 
 const GAME_WINDOW_DEFAULTS = { width: 1200, height: 800, minWidth: 800, minHeight: 600 };
 const BACKGROUND_COLOR = '#484955';
+
+// Which Windows this is, read once at startup. Electron 11 is old enough to still run on
+// Windows 7 and 8, but Chromium 87 cannot trust the GPU on those machines: it asks for
+// D3D11, which only reaches Windows 7 through the platform update (KB4474419), and the
+// machines that still need this launcher most often do not have it. The result is a black
+// window rather than an error, so the switches below answer it before it is asked for.
+// lib/windowsSupport.js holds the rules and is tested without an Electron runtime.
+const windows = describeWindows();
 
 // One 256px PNG arms the window icon on every platform and the dock icon on Linux and
 // Windows; the packaged macOS app takes its icon from build/icon.icns via electron-builder,
@@ -124,6 +133,33 @@ function armFlash() {
     }
 }
 
+/**
+ * The switches a legacy Windows needs, applied before Chromium reads its command line.
+ *
+ * Scoped to Windows 7 and 8 deliberately: the same switches on Windows 10 would cost the
+ * game real frames to work around a problem that machine does not have.
+ * `DUNGEON_BLITZ_GPU=hardware` keeps the GPU on a legacy machine that has the platform
+ * update, which is the one of those two answers a player can pick wrongly.
+ */
+function applyWindowsCompatibility() {
+    const switches = compatibilitySwitches({ gpu: process.env.DUNGEON_BLITZ_GPU });
+
+    if (process.platform === 'win32') {
+        console.log(
+            `[Windows] ${windows.product}${windows.softwareRendering ? ' - legacy Windows, rendering in software' : ''}`
+        );
+    }
+
+    for (const { name, value } of switches) {
+        if (value) {
+            app.commandLine.appendSwitch(name, value);
+        } else {
+            app.commandLine.appendSwitch(name);
+        }
+        console.log(`[Windows] --${name}${value ? `=${value}` : ''}`);
+    }
+}
+
 function resolveSelectedServer() {
     const { servers, defaultServerId } = loadServers();
     const saved = state.read();
@@ -173,6 +209,18 @@ function refuseToStart() {
         console.log(`[Flash] (a vendored plugin was found at ${vendored} but could not be armed)`);
     }
     dialog.showErrorBox('Dungeon Blitz: R cannot start', detail);
+    app.exit(1);
+}
+
+/**
+ * A Windows the pinned runtime cannot run on. The same shape as the Flash-less refusal
+ * below: name what is missing and quit, rather than leaving a player on a window whose game
+ * can never load. On Windows 7 without the C runtime update there is nothing to show even
+ * this -- the README says so instead.
+ */
+function refuseUnsupportedWindows() {
+    console.error(`[Windows] Refusing to start: ${windows.reason}`);
+    dialog.showErrorBox('Dungeon Blitz: R cannot start', unsupportedWindowsMessage(windows));
     app.exit(1);
 }
 
@@ -230,6 +278,22 @@ function flashStatus() {
     };
 }
 
+/**
+ * What this Windows is costing, for the window's status strip: on Windows 7 and 8 the game
+ * runs on a software rasteriser, which is playable and visibly slower, and that should not
+ * read as a fault in the launcher.
+ */
+function windowsStatus() {
+    return {
+        supported: Boolean(windows.supported),
+        product: String(windows.product || ''),
+        legacy: Boolean(windows.legacy),
+        softwareRendering: Boolean(windows.softwareRendering),
+        reason: String(windows.reason || ''),
+        requirements: String(windows.requirements || '')
+    };
+}
+
 /** What the widget-stats pipeline is doing, for the window's status strip. */
 function gameStatsSummary() {
     const snapshot = gameStats.snapshot();
@@ -266,6 +330,7 @@ function launcherState() {
         selectedServerUrl: selected ? selected.url : '',
         serverReachable,
         gameRunning: Boolean(gameWindow && !gameWindow.isDestroyed()),
+        windows: windowsStatus(),
         flash: flashStatus(),
         presence: presenceSummary(),
         social: socialSummary(),
@@ -988,6 +1053,7 @@ if (!app.requestSingleInstanceLock()) {
         }
     });
 
+    applyWindowsCompatibility();
     armFlash();
     restoreDiscordLogin();
     installLocation = inspectInstallLocation({ isPackaged: app.isPackaged, appPath: app.getAppPath() });
@@ -1013,6 +1079,13 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
 
     app.whenReady().then(() => {
+        // Checked before the Flash guard because nothing below it can matter on a Windows
+        // the pinned runtime cannot run on at all.
+        if (!windows.supported) {
+            refuseUnsupportedWindows();
+            return;
+        }
+
         if (!buildIsPlayable()) {
             refuseToStart();
             return;

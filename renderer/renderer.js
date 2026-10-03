@@ -31,6 +31,35 @@ function engineRows(state) {
     const presence = state.presence || {};
     const chat = state.chat || {};
     const widget = state.gameStats || {};
+    const system = state.windows || {};
+
+    // What this Windows costs. Windows 7 and 8 run the launcher on a software rasteriser:
+    // playable, visibly slower, and a player who did not know that would read the frame
+    // rate as a fault in the launcher. The machine is the first row because everything
+    // below it is answered differently on it.
+    let systemValue = 'supported';
+    let systemTone = 'muted';
+    let systemDetail = 'This launcher runs here with hardware rendering.';
+    if (!system.product) {
+        systemValue = 'not a Windows build';
+        systemDetail = 'The Windows compatibility fallback applies only on Windows.';
+    } else if (!system.supported) {
+        systemValue = 'this Windows is too old';
+        systemTone = 'bad';
+        systemDetail = system.reason || system.requirements;
+    } else if (system.softwareRendering) {
+        systemValue = `${system.product} - software rendering`;
+        systemTone = 'warn';
+        systemDetail =
+            "Chromium 87 cannot drive this machine's GPU, so the launcher renders in software. " +
+            'The game window is slower here than on a newer Windows.';
+    } else if (system.legacy) {
+        systemValue = system.product;
+        systemTone = 'ok';
+        systemDetail = 'A legacy Windows that still runs the game with hardware rendering.';
+    } else {
+        systemValue = system.product;
+    }
 
     let flashValue = 'missing';
     let flashTone = 'bad';
@@ -170,6 +199,7 @@ function engineRows(state) {
     }
 
     return [
+        { label: 'Windows', value: systemValue, tone: systemTone, detail: systemDetail },
         { label: 'Flash', value: flashValue, tone: flashTone, detail: flashDetail },
         { label: 'Discord status', value: presenceValue, tone: presenceTone, detail: presenceDetail },
         { label: 'Lobby chat', value: socialValue, tone: socialTone, detail: socialDetail },

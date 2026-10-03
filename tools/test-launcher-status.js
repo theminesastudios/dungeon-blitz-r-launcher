@@ -128,6 +128,14 @@ function baseState(flash, social, extra = {}) {
             lastError: ''
         },
         update: extra.update || { state: 'not-available', percent: 0, version: '', error: '', currentVersion: '1.0.0' },
+        windows: extra.windows || {
+            supported: true,
+            product: 'Windows 10 or later',
+            legacy: false,
+            softwareRendering: false,
+            reason: '',
+            requirements: ''
+        },
         install: extra.install || { relocate: false, reason: '', message: '', sourcePath: '', targetPath: '', canMove: false },
         discord: extra.discord || { linked: false, email: '', name: '', remembered: false, loginPending: false }
     };
@@ -189,6 +197,7 @@ function main() {
     assert.deepStrictEqual(
         rows.map((entry) => [entry.label, entry.value, entry.tone]),
         [
+            ['Windows', 'Windows 10 or later', 'muted'],
             ['Flash', '32.0.0.303 - vendor', 'ok'],
             ['Discord status', 'Home - Idling in town', 'ok'],
             ['Lobby chat', 'connected', 'ok'],
@@ -200,6 +209,46 @@ function main() {
     assert.ok(row(rows, 'Flash').detail.includes('PepperFlashPlayer.plugin'), 'the Flash path is the tooltip');
     assert.strictEqual(row(rows, 'Lobby chat').detail, 'Lobby chat connected.');
     assert.ok(row(rows, 'Discord status').detail.includes('47631'), 'the local presence endpoint is the tooltip');
+
+    // The machine row: Windows 7 runs the launcher on a software rasteriser, and a player
+    // who did not know that would read the frame rate as a fault in the launcher.
+    const WINDOWS_7 = {
+        supported: true,
+        product: 'Windows 7 SP1',
+        legacy: true,
+        softwareRendering: true,
+        reason: '',
+        requirements: 'Windows 7 Service Pack 1, Windows 8 or Windows 8.1, 64-bit.'
+    };
+    render(baseState(ARMED_FLASH, IDLE_SOCIAL, { windows: WINDOWS_7 }));
+    rows = rowsFrom(registry);
+    assert.strictEqual(row(rows, 'Windows').value, 'Windows 7 SP1 - software rendering');
+    assert.strictEqual(row(rows, 'Windows').tone, 'warn');
+    assert.ok(row(rows, 'Windows').detail.includes('software'), row(rows, 'Windows').detail);
+
+    // A Windows the pinned runtime cannot run on: said in the strip, not left to decode
+    // from a launcher that would not have started.
+    render(
+        baseState(ARMED_FLASH, IDLE_SOCIAL, {
+            windows: {
+                supported: false,
+                product: 'Windows Vista',
+                legacy: true,
+                softwareRendering: false,
+                reason: 'Windows Vista is older than Windows 7 Service Pack 1 (64-bit).',
+                requirements: ''
+            }
+        })
+    );
+    rows = rowsFrom(registry);
+    assert.strictEqual(row(rows, 'Windows').value, 'this Windows is too old');
+    assert.strictEqual(row(rows, 'Windows').tone, 'bad');
+    assert.ok(row(rows, 'Windows').detail.includes('Windows Vista'), row(rows, 'Windows').detail);
+
+    // A macOS or Linux build has no Windows to talk about, and says so rather than
+    // pretending to know.
+    render(baseState(ARMED_FLASH, IDLE_SOCIAL, { windows: { supported: true, product: '', legacy: false, softwareRendering: false, reason: '', requirements: '' } }));
+    assert.strictEqual(row(rowsFrom(registry), 'Windows').value, 'not a Windows build');
 
     // A plugin whose architecture cannot load here.
     render(baseState({ ...ARMED_FLASH, archMismatch: true }, IDLE_SOCIAL));
