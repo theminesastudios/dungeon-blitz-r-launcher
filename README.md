@@ -96,6 +96,40 @@ On purpose. The last Flash plugin is an x86_64 binary and a PPAPI plugin must ma
 architecture of the process hosting it, so an arm64 build would start and then never find a
 usable plugin. Apple Silicon runs this build under Rosetta, and CI uses the Intel runner.
 
+### Windows versions
+
+Electron 11 is old enough to still run on Windows 7. Electron only dropped Windows 7, 8 and
+8.1 in version 23, long after the PPAPI Flash host this launcher is pinned to was removed,
+so the runtime starts on every Windows from 7 Service Pack 1 up:
+
+| Windows | Result |
+| --- | --- |
+| Windows 7 SP1 (x64) | supported, renders in software |
+| Windows 8, Windows 8.1 (x64) | supported, renders in software |
+| Windows 10 and later | supported, hardware rendering |
+| Windows Vista and older | refused at start, naming what is needed |
+
+**64-bit only**, for the same reason macOS is: the plugin is an x86_64 binary and a PPAPI
+plugin must match the process hosting it.
+
+**Windows 7 needs the Universal C Runtime update.** Electron's binaries link against
+`ucrtbase.dll`, which Windows 7 and 8 carry only through **KB2999226** (or the earlier
+**KB2533623**). Without it the launcher does not start at all -- no window, no message, no
+error box -- so install it before the first run.
+
+**The GPU is the other half.** Chromium 87 asks for D3D11, which reaches Windows 7 through
+the platform update (**KB4474419**). Without it -- and on the netbooks and VMs where this
+launcher is most wanted -- the window is black or the GPU process dies during start, which
+never says which driver is at fault. `lib/windowsSupport.js` therefore switches Windows 7
+and 8 to software rendering (`--use-gl=swiftshader --disable-gpu-compositing`) before the
+first window is created, and **leaves Windows 10 alone**: the same switches there would cost
+the game real frames for a problem that machine does not have. A legacy machine that does
+have the platform update can keep the GPU with `DUNGEON_BLITZ_GPU=hardware`.
+
+The status strip carries a `Windows` row saying which of these is in force, so a slower game
+window on Windows 7 is not read as a fault in the launcher. `node tools/test-windows-support.js`
+walks the whole matrix from any machine -- `os.release()` is a parameter, not a call.
+
 ## Discord rich presence
 
 Rich presence is served **by the launcher itself** (`lib/presence.js`). The game page
