@@ -1,6 +1,6 @@
 {
   "name": "dungeon-blitz-r-launcher",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "private": true,
   "description": "Dungeon Blitz: R launcher with an embedded Adobe Flash (PPAPI) runtime",
   "homepage": "https://theminesa.studio",
@@ -70,13 +70,15 @@
         {
           "target": "nsis",
           "arch": [
-            "x64"
+            "x64",
+            "ia32"
           ]
         },
         {
           "target": "portable",
           "arch": [
-            "x64"
+            "x64",
+            "ia32"
           ]
         }
       ]

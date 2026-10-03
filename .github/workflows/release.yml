@@ -74,7 +74,9 @@ jobs:
             builder_args: --win
           # An Intel runner, because the last Flash plugin is x86_64 and a PPAPI plugin
           # must match the architecture of the process hosting it. macos-13 was retired,
-          # and a retired label does not fail -- the job simply queues forever.
+          # and a retired label does not fail -- the job simply queues forever. Windows
+          # builds x64 and ia32 from the config (--win with no --arch); the ia32 package
+          # installs but cannot play, which tools/preflight.js says out loud.
           - os: macos-15-intel
             platform: darwin
             label: macOS

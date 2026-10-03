@@ -96,6 +96,45 @@ On purpose. The last Flash plugin is an x86_64 binary and a PPAPI plugin must ma
 architecture of the process hosting it, so an arm64 build would start and then never find a
 usable plugin. Apple Silicon runs this build under Rosetta, and CI uses the Intel runner.
 
+### 32-bit Windows
+
+The Windows targets build `ia32` as well as `x64`, so the releases page carries
+`-win-ia32-setup.exe` and `-win-ia32-portable.exe`. **Those installers install and open,
+and then refuse to play.** That is the intended behaviour of the 32-bit build, not a bug
+in it, and it is the only honest thing a 32-bit package can do here.
+
+The reason is `payload/flash/win32/pepflashplayer64.dll`. It is the only Windows Flash
+plugin this project vendors, it is x86_64, and a PPAPI plugin is loaded *into the
+launcher process* -- so a 32-bit process has nothing it can load. The build would install
+onto a 32-bit Windows and then present a launcher whose game never arrives, which is the
+worst of both outcomes: it looks like a working install and is not one.
+
+So the 32-bit build says so itself, at startup, before the first window:
+
+```
+This launcher is a 64-bit application and an ia32 process cannot host the Flash plugin.
+
+Running on: an ia32 process (win32)
+The Flash plugin is an x86_64 binary and a PPAPI plugin is loaded into this very
+process, so there is nothing a 32-bit build can load. The game will not start.
+
+Install the 64-bit launcher (win-x64) instead of this one (win-ia32). A 64-bit
+Windows 7 or later is what this game needs; Windows 7 and 8 run it in software.
+
+See "32-bit Windows" in the launcher README.
+```
+
+`lib/windowsSupport.js` is what decides this, and `node tools/test-windows-support.js`
+covers it against Windows 7, 8 and 10 without needing a 32-bit machine. `tools/preflight.js`
+checks the same fact at build time by reading the arches out of `package.json` and parsing
+the plugin's PE header, and prints which of the built packages the plugin will not serve.
+
+**If you need a 32-bit build that actually plays**, the blocker is a binary that cannot be
+produced here: a 32-bit `pepflashplayer32.dll`, added to `payload/flash/win32/` (Git LFS),
+from a Flash release at `32.0.0.363` or earlier. Nothing above changes -- the config, the
+refusal, and the preflight check all read the plugin that is actually there. Later than
+that version the plugin carries Adobe's kill switch and refuses to run the game at all.
+
 ### Windows versions
 
 Electron 11 is old enough to still run on Windows 7. Electron only dropped Windows 7, 8 and
@@ -110,7 +149,8 @@ so the runtime starts on every Windows from 7 Service Pack 1 up:
 | Windows Vista and older | refused at start, naming what is needed |
 
 **64-bit only**, for the same reason macOS is: the plugin is an x86_64 binary and a PPAPI
-plugin must match the process hosting it.
+plugin must match the process hosting it. See "32-bit Windows" below for what the ia32
+installers do.
 
 **Windows 7 needs the Universal C Runtime update.** Electron's binaries link against
 `ucrtbase.dll`, which Windows 7 and 8 carry only through **KB2999226** (or the earlier
@@ -398,9 +438,15 @@ attaches the installers to a draft GitHub release tagged `v<version>`:
 
 | Platform | Files |
 | --- | --- |
-| Windows | `...-win-x64-setup.exe`, `...-win-x64-portable.exe` |
+| Windows | `...-win-x64-setup.exe`, `...-win-x64-portable.exe`, `...-win-ia32-setup.exe`, `...-win-ia32-portable.exe` |
 | macOS | `...-mac-x64.dmg`, `...-mac-x64.zip` |
 | Linux | `...-linux-x86_64.AppImage`, `...-linux-amd64.deb` |
+
+The two `win-ia32` files install and open but **cannot play** -- see "32-bit Windows" above.
+Only the x64 entries go into the updater feed, because that is the build an installed
+launcher can actually be; an ia32 install is not a working install and has nothing to
+update to. electron-builder splits the Windows update manifests per architecture, so
+expect an `ia32` manifest alongside `latest.yml` in the release assets.
 
 Editing `package.json` without changing the version builds nothing; the workflow compares
 against the previous commit first. A manual run builds the current version, and only

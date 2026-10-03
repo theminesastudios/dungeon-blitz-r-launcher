@@ -51,22 +51,75 @@ function describeVendor(platform) {
     return { directory, found };
 }
 
-// The packaged launcher is x64 on every platform, and a PPAPI plugin is loaded
-// in-process, so the vendored plugin has to match. Parse the binary headers and warn
-// loudly instead of shipping a package whose Flash can never start.
+// A PPAPI plugin is loaded in-process, so the vendored plugin has to match the
+// architecture of the package hosting it. Parse the binary headers and warn loudly rather
+// than shipping a package whose Flash can never start.
+//
+// The Windows targets are x64 and ia32 together, so this compares against the
+// architectures actually configured in package.json rather than an assumed x64: a
+// plugin matching neither is a broken build, and a plugin matching only some of them
+// leaves the rest installing and then refusing to play, which is the 32-bit situation
+// documented in README "32-bit Windows".
 function warnIfArchUnsupported(platform, directory, pluginName) {
     const architectures = pluginArchitectures(path.join(directory, pluginName));
-    if (!architectures.length || architectures.includes('x64')) {
+    if (!architectures.length) {
+        return;
+    }
+
+    const targets = configuredArchitectures(platform);
+    const matching = targets.filter((target) => architectures.includes(target));
+    if (matching.length === targets.length) {
+        return;
+    }
+
+    const unmatched = targets.filter((target) => !architectures.includes(target));
+
+    if (!matching.length) {
+        console.warn('');
+        console.warn(
+            `[preflight] WARNING: ${pluginName} supports only ${architectures.join('/')}, but the ${platform}`
+        );
+        console.warn(`[preflight] packages are ${targets.join('/')}. No build of this platform can load it.`);
+        console.warn('[preflight] Produce a matching plugin and copy it into vendor/ with `npm run extract-flash`.');
+        console.warn('');
         return;
     }
 
     console.warn('');
     console.warn(
-        `[preflight] WARNING: ${pluginName} supports only ${architectures.join('/')}, not x64.`
+        `[preflight] NOTE: ${pluginName} supports ${architectures.join('/')}, so the ${unmatched.join('/')} ` +
+        `package${unmatched.length === 1 ? '' : 's'} for ${platform} install but cannot play.`
     );
-    console.warn(`[preflight] The ${platform} package is x64, so this plugin cannot load. Produce an x86_64`);
-    console.warn('[preflight] plugin and copy it into vendor/ with `npm run extract-flash`.');
+    console.warn(`[preflight] The ${matching.join('/')} package is unaffected. See README "32-bit Windows".`);
     console.warn('');
+}
+
+/**
+ * The architectures package.json builds for a platform, flattened across its targets.
+ *
+ * @param {string} platform
+ * @returns {string[]} e.g. ['x64', 'ia32'] for win32; ['x64'] when a target names none,
+ *   which is electron-builder's own default of the host architecture.
+ */
+function configuredArchitectures(platform) {
+    const buildConfig = require(path.join(LAUNCHER_ROOT, 'package.json')).build || {};
+    const config = buildConfig[platform === 'win32' ? 'win' : platform === 'darwin' ? 'mac' : 'linux'];
+    if (!config) {
+        return [];
+    }
+
+    const targets = Array.isArray(config.target) ? config.target : [config.target];
+    const architectures = new Set();
+
+    for (const target of targets) {
+        // A target is either a string ("nsis") or an object with its own arch list.
+        const list = target && typeof target === 'object' ? target.arch : undefined;
+        for (const arch of list || []) {
+            architectures.add(arch);
+        }
+    }
+
+    return Array.from(architectures);
 }
 
 /**

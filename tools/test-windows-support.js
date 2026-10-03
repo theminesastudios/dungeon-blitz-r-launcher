@@ -17,9 +17,11 @@ const assert = require('assert');
 const {
     LEGACY_REQUIREMENTS,
     MINIMUM_WINDOWS,
+    SUPPORTED_ARCHITECTURES,
     WINDOWS_7_SERVICE_PACK_1_BUILD,
     compatibilitySwitches,
     describeWindows,
+    unsupportedArchitectureMessage,
     unsupportedWindowsMessage
 } = require('../lib/windowsSupport');
 
@@ -134,8 +136,72 @@ function main() {
 
     assert.strictEqual(WINDOWS_7_SERVICE_PACK_1_BUILD, 7601, 'the service pack build this pins');
 
+    // The 32-bit Windows installers exist and install, but the plugin is x86_64 and loaded
+    // in-process, so an ia32 build is refused by name rather than opening a window whose
+    // game can never load. Checked against every supported Windows, because the refusal
+    // must not depend on the version being new enough to otherwise be supported.
+    assert.deepStrictEqual(SUPPORTED_ARCHITECTURES, ['x64'], 'the plugin is x86_64 only');
+
+    let ia32Windows7;
+    for (const release of ['6.1.7601', '6.2.9200', '10.0.19045']) {
+        const ia32 = describeWindows({ platform: WIN32, release, arch: 'ia32' });
+        assert.strictEqual(ia32.supported, false, `ia32 on ${release} must be refused`);
+        assert.strictEqual(ia32.architectureSupported, false);
+        assert.strictEqual(ia32.arch, 'ia32');
+        assert.ok(ia32.reason.includes('ia32'), ia32.reason);
+        assert.ok(ia32.reason.includes('64-bit'), ia32.reason);
+        // The architecture is the more useful answer than "this Windows is too old", so it
+        // has to be the reason -- on Windows 7 and 8, which are otherwise supported.
+        assert.ok(ia32.reason.includes('Flash plugin'), ia32.reason);
+        assert.ok(ia32.requirements.includes('win-x64'), ia32.requirements);
+        assert.ok(!ia32.requirements.includes('KB2999226'), 'an ia32 refusal is not a Windows 7 refusal');
+        assert.ok(ia32.product.includes('ia32'), ia32.product);
+        // Nothing is rendered on a refused machine, whatever the Windows version is.
+        assert.strictEqual(ia32.softwareRendering, false);
+        assert.deepStrictEqual(switchList({ platform: WIN32, release, arch: 'ia32' }), []);
+
+        if (release === '6.1.7601') {
+            ia32Windows7 = ia32;
+        }
+    }
+
+    // The same ia32 build is refused on a Windows it could never have run on anyway, so the
+    // two refusals cannot contradict each other about what is wrong.
+    const ia32Vista = describeWindows({ platform: WIN32, release: '6.0.6002', arch: 'ia32' });
+    assert.strictEqual(ia32Vista.supported, false);
+    assert.ok(ia32Vista.reason.includes('ia32'), ia32Vista.reason);
+
+    // An x64 build is unchanged by any of this: still supported, still named, still renders.
+    const x64 = describeWindows({ platform: WIN32, release: '6.1.7601', arch: 'x64' });
+    assert.strictEqual(x64.supported, true);
+    assert.strictEqual(x64.architectureSupported, true);
+    assert.strictEqual(x64.product, 'Windows 7 SP1');
+    assert.strictEqual(x64.requirements, LEGACY_REQUIREMENTS);
+
+    // arm64 Windows is the same unplayable case as ia32, and is refused the same way
+    // rather than reaching a version check it has no business passing.
+    const arm64 = describeWindows({ platform: WIN32, release: '10.0.22631', arch: 'arm64' });
+    assert.strictEqual(arm64.supported, false);
+    assert.ok(arm64.reason.includes('arm64'), arm64.reason);
+
+    // The refusal text points at the fix rather than the symptom, and does not send a
+    // 32-bit player after a service pack that was never the problem.
+    const archMessage = unsupportedArchitectureMessage(ia32Windows7);
+    assert.ok(archMessage.includes('ia32'), archMessage);
+    assert.ok(archMessage.includes('64-bit'), archMessage);
+    assert.ok(archMessage.includes('Flash'), archMessage);
+    assert.ok(!archMessage.includes('KB2999226'), archMessage);
+    // "an ia32 process" and "an arm64 process": the article has to agree with the
+    // architecture, which is a word the player is reading for the first time.
+    assert.ok(!/a ia32|a arm64/.test(archMessage), archMessage);
+    assert.ok(/an ia32 process/.test(archMessage), archMessage);
+    assert.ok(/an arm64 process/.test(unsupportedArchitectureMessage(arm64)), 'arm64 takes "an" too');
+    // The message names the download to switch to, not only the architecture.
+    assert.ok(archMessage.includes('win-x64'), archMessage);
+
     console.log('[test-windows-support] Windows 7, 8 and 8.1 are supported with software rendering');
     console.log('[test-windows-support] Vista, XP and unreadable versions are refused by name');
+    console.log('[test-windows-support] 32-bit builds are refused as unplayable, x64 is unaffected');
     console.log('[test-windows-support] all assertions passed');
 }
 

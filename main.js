@@ -10,7 +10,7 @@ const { createLauncherSessionRecovery } = require('./lib/launcherSessionRecovery
 const discordAuth = require('./lib/discordAuth');
 const { exists, inspectInstallLocation, isWritableDirectory } = require('./lib/install');
 const { findFlashPlugin, findVendoredPlugin } = require('./lib/flash');
-const { compatibilitySwitches, describeWindows, unsupportedWindowsMessage } = require('./lib/windowsSupport');
+const { compatibilitySwitches, describeWindows, unsupportedArchitectureMessage, unsupportedWindowsMessage } = require('./lib/windowsSupport');
 const { PresenceBridge } = require('./lib/presence');
 const { SocialBridge } = require('./lib/social');
 const { createUpdateService } = require('./lib/update');
@@ -220,7 +220,15 @@ function refuseToStart() {
  */
 function refuseUnsupportedWindows() {
     console.error(`[Windows] Refusing to start: ${windows.reason}`);
-    dialog.showErrorBox('Dungeon Blitz: R cannot start', unsupportedWindowsMessage(windows));
+
+    // A 32-bit build is refused with its own text: "install the 64-bit one" is the whole
+    // of the answer there, and burying it under the Windows 7 requirements would send the
+    // player off to install service packs on a machine that was never the problem.
+    const message = windows.architectureSupported
+        ? unsupportedWindowsMessage(windows)
+        : unsupportedArchitectureMessage(windows);
+
+    dialog.showErrorBox('Dungeon Blitz: R cannot start', message);
     app.exit(1);
 }
 
@@ -289,6 +297,11 @@ function windowsStatus() {
         product: String(windows.product || ''),
         legacy: Boolean(windows.legacy),
         softwareRendering: Boolean(windows.softwareRendering),
+        // The 32-bit installers are refused on start, so the status strip is what a build
+        // that somehow got past that would read from. Kept because it is the same fact
+        // every other row is: what this machine is, and what it can do.
+        architecture: String(windows.arch || ''),
+        architectureSupported: Boolean(windows.architectureSupported),
         reason: String(windows.reason || ''),
         requirements: String(windows.requirements || '')
     };
