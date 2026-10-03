@@ -76,7 +76,10 @@ jobs:
             platform: win32
             arch: x64
             label: Windows x64
-            builder_args: --win --x64
+            # `nsis:x64` / `portable:x64` rather than the --x64 flag: the flag only decides
+            # which arches are requested, and `build.win` still lists x64, so asking for ia32
+            # produced BOTH (plus the universal) instead of replacing it.
+            builder_args: --win nsis:x64 portable:x64
             publish_mode: always
           # The 32-bit installers, which install and open but cannot play: the only Flash
           # plugin this project vendors is x86_64. Documented in the README, and
@@ -85,7 +88,8 @@ jobs:
             platform: win32
             arch: ia32
             label: Windows ia32
-            builder_args: --win --ia32
+            # The per-target `name:arch` suffix is what pins this run to ia32 alone.
+            builder_args: --win nsis:ia32 portable:ia32
             publish_mode: never
           # An Intel runner, because the last Flash plugin is x86_64 and a PPAPI plugin
           # must match the architecture of the process hosting it. macos-13 was retired,

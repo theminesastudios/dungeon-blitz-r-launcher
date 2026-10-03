@@ -74,13 +74,39 @@ function main() {
 
     // And the ia32 run has to exist in the workflow, or 32-bit silently stops shipping.
     const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf8');
-    assert.ok(
-        /builder_args:\s*--win --ia32/.test(workflow),
-        'release.yml must build Windows ia32 as its own --win --ia32 run'
-    );
-    assert.ok(
-        !/builder_args:\s*--win\s*$/.test(workflow) && !/--win --x64 --ia32/.test(workflow),
-        'no single run may package both Windows architectures: that rebuilds the universal installer'
+
+    // Every Windows run must pin its architecture with the per-target `name:arch` suffix.
+    // A bare `--win --ia32` does NOT override `build.win`: the flag says which arches are
+    // *requested*, the config still says x64, and the run packages both -- which is what
+    // 1.0.14 shipped, universal installer included.
+    const windowsRuns = [...workflow.matchAll(/builder_args:\s*--win\s+([^\n]*)/g)].map((match) => match[1].trim());
+    assert.strictEqual(windowsRuns.length, 2, 'release.yml must have exactly two Windows runs, x64 and ia32');
+
+    for (const args of windowsRuns) {
+        // Exactly one architecture, applied to both targets: mixing them would rebuild the
+        // universal installer, and naming neither falls back to build.win.
+        const named = [...args.matchAll(/\b(?:nsis|portable):(\w+)/g)].map((match) => match[1]);
+        assert.strictEqual(named.length, 2, `a Windows run must name both targets explicitly, got "${args}"`);
+        assert.strictEqual(
+            new Set(named).size,
+            1,
+            `one run must build exactly one architecture, got "${args}"`
+        );
+        assert.ok(
+            ['x64', 'ia32'].includes(named[0]),
+            `unknown architecture in "${args}"`
+        );
+        assert.ok(
+            !/--ia32\b|--x64\b/.test(args),
+            `use the nsis:<arch> suffix, not --ia32/--x64: the flag does not override build.win. Got "${args}"`
+        );
+    }
+
+    // And the two runs must be the two different architectures.
+    assert.deepStrictEqual(
+        windowsRuns.map((args) => args.match(/nsis:(\w+)/)[1]).sort(),
+        ['ia32', 'x64'],
+        'the two Windows runs must cover both architectures, one each'
     );
 
     // Both Windows jobs upload artifacts, and actions/upload-artifact rejects a duplicate

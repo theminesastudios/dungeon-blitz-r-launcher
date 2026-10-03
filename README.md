@@ -461,16 +461,23 @@ So 1.0.12 shipped three packages per target -- `win-x64-*`, `win-ia32-*` and a ~
 `win-setup.exe` carrying both -- and `latest.yml` pointed at the universal one, making
 every x64 player updating from 1.0.11 download roughly twice what they needed.
 
-The fix is one electron-builder run per architecture (`--win --x64`, then `--win --ia32`),
-which is why `package.json` only configures x64 and the workflow has a separate Windows ia32
-matrix entry. Two details that are easy to get wrong:
+The fix is one electron-builder run per architecture, which is why `package.json` only
+configures x64 and the workflow has a separate Windows ia32 matrix entry. Three details
+that each cost a release to learn:
 
-- **`latest.yml` is not per-architecture on Windows.** `getArchPrefixForUpdateFile()` only
-  adds an arch suffix on Linux, so both Windows runs write the same `latest.yml` and
-  whichever finishes last owns it. The ia32 run uses `--publish never` and its manifest is
-  deleted, so an x64 player can never be offered a 32-bit installer.
-- **The two Windows jobs upload distinct artifact names** (`launcher-win32-x64`,
-  `launcher-win32-ia32`); sharing one name makes the second upload fail.
+- **Splitting the config's target entries does nothing.** The arches accumulate in one
+  *invocation* regardless of how `build.win.target` is written.
+- **`--win --ia32` does not override `build.win`.** The flag says which arches are
+  *requested*; the config still contributes x64, so the run packages both and rebuilds
+  the universal (1.0.14 did this). The per-target suffix does override it:
+  `--win nsis:ia32 portable:ia32`.
+- **`latest.yml` is not per-architecture on Windows.** `getArchPrefixForUpdateFile()` adds
+  an arch suffix only on Linux, so both Windows runs write the same filename and whichever
+  finishes last owns it. The ia32 run uses `--publish never` and drops its manifest, so an
+  x64 player can never be offered a 32-bit installer.
+
+The two Windows jobs also upload distinct artifact names (`launcher-win32-x64`,
+`launcher-win32-ia32`); sharing one name makes the second upload fail.
 
 The `win-ia32` files install and open but **cannot play** -- see "32-bit Windows" above.
 They are published from an unplayable build on purpose: a 32-bit player gets the launcher
