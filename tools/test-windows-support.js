@@ -186,7 +186,7 @@ function main() {
 
     // The refusal text points at the fix rather than the symptom, and does not send a
     // 32-bit player after a service pack that was never the problem.
-    const archMessage = unsupportedArchitectureMessage(ia32Windows7);
+    const archMessage = unsupportedArchitectureMessage(ia32Windows7, { version: '1.0.15' });
     assert.ok(archMessage.includes('ia32'), archMessage);
     assert.ok(archMessage.includes('64-bit'), archMessage);
     assert.ok(archMessage.includes('Flash'), archMessage);
@@ -196,8 +196,40 @@ function main() {
     assert.ok(!/a ia32|a arm64/.test(archMessage), archMessage);
     assert.ok(/an ia32 process/.test(archMessage), archMessage);
     assert.ok(/an arm64 process/.test(unsupportedArchitectureMessage(arm64)), 'arm64 takes "an" too');
-    // The message names the download to switch to, not only the architecture.
-    assert.ok(archMessage.includes('win-x64'), archMessage);
+
+    // The exact file to download, spelled the way the release page spells it. A player
+    // who installed win-ia32 has to be able to match this against the asset list by eye,
+    // and GitHub orders that list with ia32 above x64.
+    assert.ok(
+        archMessage.includes('DungeonBlitzR-Launcher-1.0.15-win-x64-setup.exe'),
+        `the refusal must name the installer exactly:\n${archMessage}`
+    );
+
+    // That name is built from build.nsis.artifactName, so a change there silently breaks
+    // the instruction. Derive it from package.json rather than restating it.
+    const artifactName = require('../package.json').build.nsis.artifactName;
+    assert.strictEqual(
+        artifactName.replace('${version}', '1.0.15').replace('${arch}', 'x64').replace('${ext}', 'exe'),
+        'DungeonBlitzR-Launcher-1.0.15-win-x64-setup.exe',
+        'the dialog quotes build.nsis.artifactName; if that changes, update unsupportedArchitectureMessage()'
+    );
+
+    // And it has to say the OS being 64-bit does not make the 32-bit build work: that is
+    // precisely the case that produced the support request.
+    assert.ok(
+        /even if this machine is 64-bit/.test(archMessage),
+        `the refusal must cover the 64-bit-OS-32-bit-launcher case:\n${archMessage}`
+    );
+    assert.ok(/Uninstall it/.test(archMessage), archMessage);
+
+    // Without a version (a development run) it must not invent a filename that is not on
+    // the releases page; the unversioned name is the honest thing to show.
+    const devMessage = unsupportedArchitectureMessage(ia32Windows7);
+    assert.ok(
+        devMessage.includes('DungeonBlitzR-Launcher-<version>-win-x64-setup.exe'),
+        devMessage
+    );
+    assert.ok(!/DungeonBlitzR-Launcher-\d/.test(devMessage), 'no made-up version in the dev message');
 
     console.log('[test-windows-support] Windows 7, 8 and 8.1 are supported with software rendering');
     console.log('[test-windows-support] Vista, XP and unreadable versions are refused by name');

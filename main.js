@@ -221,12 +221,16 @@ function refuseToStart() {
 function refuseUnsupportedWindows() {
     console.error(`[Windows] Refusing to start: ${windows.reason}`);
 
-    // A 32-bit build is refused with its own text: "install the 64-bit one" is the whole
+    // A 32-bit build is refused with its own text: the exact file to download is the whole
     // of the answer there, and burying it under the Windows 7 requirements would send the
     // player off to install service packs on a machine that was never the problem.
+    //
+    // The version names the installer exactly. A player who installed win-ia32 needs to
+    // know which of the release's files replaces it, and the list is ordered against
+    // them: GitHub sorts assets alphabetically and ia32 sorts before x64.
     const message = windows.architectureSupported
         ? unsupportedWindowsMessage(windows)
-        : unsupportedArchitectureMessage(windows);
+        : unsupportedArchitectureMessage(windows, { version: app.getVersion() });
 
     dialog.showErrorBox('Dungeon Blitz: R cannot start', message);
     app.exit(1);

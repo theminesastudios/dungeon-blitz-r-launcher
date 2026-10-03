@@ -109,7 +109,9 @@ launcher process* -- so a 32-bit process has nothing it can load. The build woul
 onto a 32-bit Windows and then present a launcher whose game never arrives, which is the
 worst of both outcomes: it looks like a working install and is not one.
 
-So the 32-bit build says so itself, at startup, before the first window:
+So the 32-bit build says so itself, at startup, before the first window -- and it names
+the exact file to download instead, because a player who took the wrong installer should
+not have to work out which of the release's files replaces it:
 
 ```
 This launcher is a 64-bit application and an ia32 process cannot host the Flash plugin.
@@ -118,11 +120,28 @@ Running on: an ia32 process (win32)
 The Flash plugin is an x86_64 binary and a PPAPI plugin is loaded into this very
 process, so there is nothing a 32-bit build can load. The game will not start.
 
-Install the 64-bit launcher (win-x64) instead of this one (win-ia32). A 64-bit
-Windows 7 or later is what this game needs; Windows 7 and 8 run it in software.
+You installed the 32-bit build. Uninstall it and download this file instead:
+
+    DungeonBlitzR-Launcher-1.0.15-win-x64-setup.exe
+
+It is on this release's page, named exactly like that. It is the same download
+for every 64-bit Windows, and the one to use even if this machine is 64-bit --
+the launcher has to be a 64-bit process to load Flash, whatever the OS is.
+
+A 64-bit Windows 7 or later is what this game needs; Windows 7 and 8 run it in
+software, which is slower but works.
 
 See "32-bit Windows" in the launcher README.
 ```
+
+The version in that name is the one the player is running, and it comes from the same
+`build.nsis.artifactName` the installer itself is built with, so the dialog cannot point
+at a file that is not on the page.
+
+**The release page lists these in an order that works against you.** GitHub sorts assets
+alphabetically, and `ia32` sorts before `x64`, so the 32-bit installers appear *above* the
+one that plays. A player taking the top Windows download gets these. The download table
+below is therefore written in the order people should actually use.
 
 `lib/windowsSupport.js` is what decides this, and `node tools/test-windows-support.js`
 covers it against Windows 7, 8 and 10 without needing a 32-bit machine. `tools/preflight.js`
@@ -438,7 +457,7 @@ attaches the installers to a draft GitHub release tagged `v<version>`:
 
 | Platform | Files |
 | --- | --- |
-| Windows | `...-win-x64-setup.exe`, `...-win-x64-portable.exe`, `...-win-ia32-setup.exe`, `...-win-ia32-portable.exe` |
+| Windows | `...-win-x64-setup.exe` **(use this one)**, `...-win-x64-portable.exe`, `...-win-ia32-setup.exe` (cannot play), `...-win-ia32-portable.exe` (cannot play) |
 | macOS | `...-mac-x64.dmg`, `...-mac-x64.zip` |
 | Linux | `...-linux-x86_64.AppImage`, `...-linux-amd64.deb` |
 
