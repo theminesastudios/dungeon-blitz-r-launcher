@@ -438,20 +438,26 @@ attaches the installers to a draft GitHub release tagged `v<version>`:
 
 | Platform | Files |
 | --- | --- |
-| Windows | `...-win-setup.exe`, `...-win-portable.exe` (universal, x64 + ia32), `...-win-x64-setup.exe`, `...-win-x64-portable.exe`, `...-win-ia32-setup.exe`, `...-win-ia32-portable.exe` |
+| Windows | `...-win-x64-setup.exe`, `...-win-x64-portable.exe`, `...-win-ia32-setup.exe`, `...-win-ia32-portable.exe` |
 | macOS | `...-mac-x64.dmg`, `...-mac-x64.zip` |
 | Linux | `...-linux-x86_64.AppImage`, `...-linux-amd64.deb` |
 
-Naming a target with two architectures makes electron-builder produce **three** Windows
-packages per target, not two: `win-x64-*`, `win-ia32-*`, and a **universal** `win-*` that
-carries both and picks the right one at install time. The universal one is roughly twice
-the size of either, because it holds both.
+Each `build.win` target names **exactly one** architecture, which is why there are four
+Windows files and not six. A target listing both --
+
+```jsonc
+{ "target": "nsis", "arch": ["x64", "ia32"] }
+```
+
+-- also makes electron-builder emit a **universal** `win-setup.exe` carrying both, which
+1.0.12 shipped. It is roughly twice the size of either single-architecture package, and
+because it is what `latest.yml` points at, every x64 player updating from 1.0.11
+downloaded ~135 MB instead of ~70 MB. Two targets, one arch each, avoids it.
 
 The `win-ia32` files install and open but **cannot play** -- see "32-bit Windows" above.
-`latest.yml` lists all three nsis installers and its `path:` points at the **universal**
-`win-setup.exe`, so an x64 launcher updating from 1.0.11 downloads the ~135 MB universal
-package rather than the ~70 MB x64-only one. `electron-updater` resolves the right entry
-from that manifest by architecture.
+`latest.yml` lists both nsis installers and its `path:` is the x64 one, so an x64 launcher
+updates with the ~70 MB package again. `electron-updater` picks the entry matching the
+installed architecture.
 
 Editing `package.json` without changing the version builds nothing; the workflow compares
 against the previous commit first. A manual run builds the current version, and only
