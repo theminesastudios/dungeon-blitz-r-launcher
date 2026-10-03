@@ -151,6 +151,9 @@ jobs:
 
       - name: Check Flash plugin
         shell: bash
+        # --arch matters for Windows: the two runs package different architectures, so the
+        # check has to be against the one this entry builds. Same reason the local
+        # npm run dist:win / dist:win:ia32 pair each run their own predist hook.
         run: node tools/preflight.js --platform ${{ matrix.platform }} --arch ${{ matrix.arch || 'x64' }}
 
       - name: Build installers

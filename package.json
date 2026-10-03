@@ -20,7 +20,8 @@
     "dist:win:ia32": "electron-builder --win nsis:ia32 portable:ia32",
     "dist:mac": "electron-builder --mac",
     "dist:linux": "electron-builder --linux",
-    "predist:win": "node tools/preflight.js --platform win32",
+    "predist:win": "node tools/preflight.js --platform win32 --arch x64",
+    "predist:win:ia32": "node tools/preflight.js --platform win32 --arch ia32",
     "predist:mac": "node tools/preflight.js --platform darwin",
     "predist:linux": "node tools/preflight.js --platform linux",
     "build:bridge": "cmake -S native_bridge -B native_bridge/build -DCMAKE_BUILD_TYPE=Release && cmake --build native_bridge/build --config Release"
